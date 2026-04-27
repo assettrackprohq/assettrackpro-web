@@ -1,0 +1,2897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>AssetTrackPro — Field</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   ASSETTRACKPRO — FIELD APP
+   THEME : Light sky-blue (default)  ·  Dark ocean (toggle)
+   FONTS : Century Gothic/Nunito → headings  (900 bold)
+           Arial/Helvetica        → body+data (700 bold)
+   ═══════════════════════════════════════════════════════════════ */
+:root{
+  --fh:'Century Gothic','Nunito',Trebuchet MS,Arial,sans-serif;
+  --fb:Arial,'Helvetica Neue',Helvetica,sans-serif;
+  /* LIGHT BLUE — default */
+  --bg:    #dbeeff;
+  --surf:  #ffffff;
+  --surf2: #c8e4ff;
+  --surf3: #b0d4ff;
+  --border:#89bfef;
+  --acc:   #0077cc;
+  --acc2:  #e08800;
+  --acc3:  #d63040;
+  --acc4:  #00996b;
+  --acc5:  #6e3ec4;
+  --text:  #0a1e38;
+  --text2: #2c5282;
+  --text3: #7aaed4;
+  --r:14px; --r-sm:9px;
+  --g-blue:  linear-gradient(135deg,#0077cc,#005fa3);
+  --g-teal:  linear-gradient(135deg,#00996b,#007a55);
+  --g-amber: linear-gradient(135deg,#e08800,#c06a00);
+  --g-violet:linear-gradient(135deg,#6e3ec4,#4f2d9a);
+}
+/* DARK OCEAN — toggled */
+[data-theme="dark"]{
+  --bg:#051428; --surf:#0b2040; --surf2:#0f2a52; --surf3:#143268; --border:#1e3d6b;
+  --acc:#38b6ff; --acc2:#f5a623; --acc3:#ff4d61; --acc4:#00d4aa; --acc5:#a78bfa;
+  --text:#e4f0ff; --text2:#6b93c4; --text3:#2a4a78;
+  --g-blue:  linear-gradient(135deg,#38b6ff,#1a6fdf);
+  --g-teal:  linear-gradient(135deg,#00d4aa,#0099c8);
+  --g-amber: linear-gradient(135deg,#f5a623,#f07020);
+  --g-violet:linear-gradient(135deg,#a78bfa,#6d5bde);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;font-family:var(--fb);font-weight:400;background:var(--bg);
+  color:var(--text);transition:background .25s,color .25s;-webkit-font-smoothing:antialiased;}
+input,select,textarea,button{font-family:var(--fb);font-weight:700;}
+.app{width:100%;height:100dvh;display:flex;flex-direction:column;overflow:hidden;position:relative;}
+@media(min-width:520px){
+  body{display:flex;justify-content:center;align-items:center;background:#a8ccea;}
+  .app{width:393px;height:852px;border-radius:44px;
+    box-shadow:0 0 0 2px #89bfef,0 40px 100px rgba(0,80,160,.3);}
+}
+/* ── LOGIN ── */
+#login-screen{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:36px 28px;
+  background:linear-gradient(160deg,#c0dcff 0%,#dbeeff 45%,#f0f8ff 100%);}
+[data-theme="dark"] #login-screen{
+  background:linear-gradient(160deg,#051428 0%,#0a2248 50%,#0f2a60 100%);}
+#login-screen.hidden{display:none;}
+.ls-logo{font-family:var(--fh);font-size:32px;font-weight:900;color:var(--text);
+  margin-bottom:4px;letter-spacing:-.5px;}
+.ls-logo em{color:var(--acc);font-style:normal;}
+.ls-sub{font-family:var(--fh);font-size:12px;color:var(--text3);margin-bottom:36px;
+  letter-spacing:.8px;text-transform:uppercase;font-weight:700;}
+.ls-field{width:100%;margin-bottom:14px;}
+.ls-lbl{font-family:var(--fh);font-size:11px;color:var(--text2);letter-spacing:.8px;
+  text-transform:uppercase;margin-bottom:7px;font-weight:800;}
+.ls-inp{width:100%;background:rgba(255,255,255,.9);border:2px solid var(--border);
+  border-radius:11px;padding:14px 16px;color:var(--text);font-size:14px;font-weight:700;
+  outline:none;transition:border-color .18s,box-shadow .18s;}
+.ls-inp:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,119,204,.15);}
+[data-theme="dark"] .ls-inp{background:rgba(255,255,255,.07);}
+.ls-btn{width:100%;padding:16px;border-radius:var(--r);background:var(--g-blue);
+  color:#fff;font-family:var(--fh);font-size:16px;font-weight:900;border:none;
+  cursor:pointer;margin-top:10px;box-shadow:0 5px 20px rgba(0,119,204,.35);
+  transition:transform .15s,box-shadow .15s;letter-spacing:.3px;}
+.ls-btn:active{transform:scale(.97);}
+.ls-err{font-size:12px;color:var(--acc3);text-align:center;margin-top:10px;
+  min-height:18px;font-weight:700;}
+/* ── Asset Approval (Field) ─────────────────────── */
+.apv-pill{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;padding:2px 7px;border-radius:5px;letter-spacing:.3px;flex-shrink:0;}
+.apv-pending {background:rgba(255,152,0,.15);color:#c45c00;}
+.apv-approved{background:rgba(0,153,107,.13);color:#00996b;}
+.apv-rejected{background:rgba(214,48,64,.12);color:#d63040;}
+.rejection-notice{display:none;background:rgba(214,48,64,.07);border:2px solid rgba(214,48,64,.25);border-radius:12px;padding:14px 16px;margin:0 20px 10px;}
+.rejection-notice.visible{display:block;}
+.rejection-notice-ttl{font-family:var(--fh);font-size:13px;font-weight:900;color:var(--acc3);margin-bottom:8px;}
+.rn-item{background:var(--surf);border:1px solid rgba(214,48,64,.2);border-radius:9px;padding:10px 12px;margin-bottom:7px;}
+.rn-item:last-child{margin-bottom:0;}
+.rn-name{font-size:12px;font-weight:700;color:var(--text);}
+.rn-bc{font-size:10px;color:var(--acc);font-family:monospace;margin-top:1px;}
+.rn-comment{font-size:11px;color:var(--acc3);margin-top:5px;font-style:italic;line-height:1.4;}
+.rn-fix-btn{margin-top:8px;background:var(--g-blue);color:#0a1e38;border:none;border-radius:8px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;font-family:var(--fh);width:100%;}
+/* ── Tenant lockout screen ───────────────────────── */
+.lockout-overlay{position:fixed;inset:0;z-index:9999;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;}
+.lockout-overlay.active{display:flex;}
+.lock-icon{font-size:56px;margin-bottom:14px;}
+.lock-title{font-family:var(--fh);font-size:22px;font-weight:900;color:var(--acc3);margin-bottom:6px;letter-spacing:-.3px;}
+.lock-company{font-family:var(--fh);font-size:14px;font-weight:800;color:var(--text);margin-bottom:12px;}
+.lock-msg{font-size:13px;color:var(--text2);max-width:310px;line-height:1.7;margin-bottom:22px;font-weight:400;}
+.lock-contact{background:rgba(214,48,64,.07);border:2px solid rgba(214,48,64,.22);border-radius:14px;padding:16px 24px;max-width:310px;width:100%;margin-bottom:20px;}
+.lock-contact-lbl{font-size:10px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;color:var(--acc3);margin-bottom:6px;}
+.lock-contact-val{font-family:var(--fh);font-size:14px;font-weight:900;color:var(--text);}
+.lock-footer{font-size:11px;color:var(--text3);margin-top:6px;}
+/* ── In-app expiry warning banner (home screen) ─── */
+.field-expiry-banner{display:none;background:rgba(255,152,0,.12);border:2px solid rgba(255,152,0,.35);border-radius:12px;padding:12px 16px;margin:0 20px 4px;text-align:center;}
+.field-expiry-banner-ttl{font-family:var(--fh);font-size:12px;font-weight:900;color:#c45c00;margin-bottom:3px;}
+.field-expiry-banner-msg{font-size:11px;color:var(--text2);line-height:1.5;}
+.ls-role{font-size:11px;color:var(--text3);text-align:center;margin-top:20px;
+  line-height:2;font-weight:400;}
+/* ── GPS STAMP ── */
+.gps-stamp{font-size:10px;color:var(--text3);margin-top:6px;font-weight:400;
+  display:flex;align-items:center;gap:4px;justify-content:center;min-height:16px;}
+/* ── FORCE-CHANGE PASSWORD OVERLAY ── */
+.fcp-overlay{position:fixed;inset:0;z-index:500;background:rgba(5,20,40,.9);
+  display:none;align-items:center;justify-content:center;padding:24px;}
+.fcp-overlay.open{display:flex;}
+.fcp-box{background:var(--surf);border:2px solid var(--border);border-radius:var(--r);
+  padding:26px;width:100%;max-width:360px;}
+.fcp-ttl{font-family:var(--fh);font-size:18px;font-weight:900;color:var(--text);margin-bottom:6px;}
+.fcp-sub{font-size:12px;color:var(--text2);margin-bottom:18px;line-height:1.6;}
+.fcp-err{font-size:12px;color:var(--acc3);min-height:16px;margin-bottom:10px;font-weight:700;}
+/* ── RETAKE BUTTON ── */
+.pslot-retake{display:none;position:absolute;bottom:0;left:0;right:0;
+  background:rgba(0,0,0,.55);color:#fff;font-size:9px;font-weight:800;
+  text-align:center;padding:3px 0;border-radius:0 0 8px 8px;letter-spacing:.5px;cursor:pointer;}
+.pslot{position:relative;}
+.pslot.filled .pslot-retake{display:block;}
+
+.screens{flex:1;overflow:hidden;position:relative;}
+.screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;opacity:0;
+  pointer-events:none;transform:translateX(14px);
+  transition:opacity .22s,transform .22s cubic-bezier(.4,0,.2,1);scrollbar-width:none;}
+.screen::-webkit-scrollbar{display:none;}
+.screen.active{opacity:1;pointer-events:all;transform:translateX(0);}
+/* ── BOTTOM NAV ── */
+.bnav{height:76px;background:var(--surf);border-top:2px solid var(--border);
+  display:flex;align-items:center;justify-content:space-around;
+  padding:0 4px 10px;flex-shrink:0;box-shadow:0 -2px 12px rgba(0,80,160,.1);}
+.nb{display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 12px;
+  border-radius:12px;cursor:pointer;background:none;border:none;
+  color:var(--text3);transition:all .18s;font-family:var(--fh);}
+.nb.on{color:var(--acc);background:rgba(0,119,204,.12);}
+.nb svg{width:21px;height:21px;}
+.nb span{font-size:10px;letter-spacing:.2px;font-weight:800;}
+/* ── SCREEN HEADER ── */
+.shdr{padding:13px 20px;display:flex;align-items:center;justify-content:space-between;
+  background:var(--surf);border-bottom:2px solid var(--border);
+  position:sticky;top:0;z-index:20;box-shadow:0 2px 10px rgba(0,80,160,.08);}
+.shdr-ttl{font-family:var(--fh);font-size:20px;font-weight:900;color:var(--text);letter-spacing:-.3px;}
+.back-btn{background:var(--surf2);border:none;border-radius:9px;padding:7px 13px;
+  color:var(--text);font-size:14px;font-weight:800;cursor:pointer;}
+.hbtn{min-width:34px;height:36px;border-radius:9px;background:var(--surf2);
+  border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
+  cursor:pointer;color:var(--text);padding:0 11px;font-size:12px;font-weight:700;
+  transition:all .18s;white-space:nowrap;}
+.hbtn:active{background:var(--acc);color:#fff;border-color:var(--acc);}
+/* ── DASHBOARD ── */
+.dh{padding:20px 20px 0;}
+.dh-lbl{font-family:var(--fh);font-size:11px;color:var(--acc);
+  letter-spacing:1.5px;text-transform:uppercase;font-weight:800;}
+.dh-ttl{font-family:var(--fh);font-size:26px;font-weight:900;color:var(--text);
+  line-height:1.05;margin-top:2px;letter-spacing:-.5px;}
+.dh-ttl em{color:var(--acc);font-style:normal;}
+.dh-user{font-size:12px;color:var(--text3);margin-top:4px;font-weight:400;}
+.dh-gps{font-size:10px;color:var(--text3);margin-top:3px;font-weight:400;
+  display:none;align-items:center;gap:3px;line-height:1.4;}
+/* ── KPI CARDS ── */
+.kgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 20px 0;}
+.kpi{background:var(--surf);border:2px solid var(--border);border-radius:var(--r);
+  padding:16px 14px;position:relative;overflow:hidden;transition:transform .15s;}
+.kpi:active{transform:scale(.97);}
+.kpi::after{content:'';position:absolute;top:0;left:0;right:0;height:4px;
+  border-radius:var(--r) var(--r) 0 0;}
+.kpi.c1::after{background:var(--g-blue);}
+.kpi.c2::after{background:var(--g-amber);}
+.kpi.c3::after{background:linear-gradient(135deg,#d63040,#e06030);}
+.kpi.c4::after{background:var(--g-teal);}
+.ki{font-size:18px;opacity:.3;position:absolute;top:12px;right:12px;}
+.kl{font-family:var(--fh);font-size:11px;color:var(--text2);
+  letter-spacing:.6px;text-transform:uppercase;font-weight:800;}
+.kv{font-family:var(--fh);font-size:28px;font-weight:900;color:var(--text);
+  line-height:1;margin:5px 0 2px;}
+.ks{font-size:11px;color:var(--text3);font-weight:400;}
+/* ── QUICK ACTIONS ── */
+.sec{display:flex;justify-content:space-between;align-items:center;padding:20px 20px 8px;}
+.sec-t{font-family:var(--fh);font-size:16px;font-weight:900;color:var(--text);letter-spacing:-.2px;}
+.qagrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:0 20px;}
+.qa{background:var(--surf2);border:2px solid var(--border);border-radius:var(--r);
+  padding:16px 14px;display:flex;flex-direction:column;gap:8px;
+  cursor:pointer;transition:all .15s;border:none;text-align:left;}
+.qa:active{transform:scale(.95);background:var(--surf3);}
+.qa.prime{background:var(--g-blue);border:none;
+  box-shadow:0 5px 18px rgba(0,119,204,.35);}
+.qa-i{font-size:24px;}
+.qa-l{font-family:var(--fh);font-size:12px;color:var(--text);font-weight:800;line-height:1.3;}
+.qa.prime .qa-l{color:#fff;}
+/* ── FORMS ── */
+.fbody{padding:16px 20px 100px;}
+.fg{margin-bottom:15px;}
+.fl{font-family:var(--fh);font-size:11px;color:var(--text2);letter-spacing:.7px;
+  text-transform:uppercase;margin-bottom:7px;display:flex;align-items:center;
+  gap:6px;font-weight:800;}
+.req{font-size:10px;color:var(--acc3);background:rgba(214,48,64,.12);
+  padding:2px 7px;border-radius:4px;font-weight:800;}
+.fi{width:100%;background:var(--surf);border:2px solid var(--border);border-radius:11px;
+  padding:13px 15px;color:var(--text);font-size:14px;font-weight:700;
+  outline:none;transition:border-color .18s,box-shadow .18s;}
+.fi:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(0,119,204,.12);}
+.fi::placeholder{color:var(--text3);font-weight:500;}
+.fi:disabled{opacity:.35;cursor:not-allowed;}
+select.fi{appearance:none;cursor:pointer;}
+.fr{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+/* ── SECTION BLOCKS ── */
+.sblk{background:var(--surf);border:2px solid var(--border);border-radius:var(--r);
+  padding:15px;margin-bottom:14px;}
+.sblk-hd{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.sblk-n{width:24px;height:24px;border-radius:50%;background:var(--g-blue);
+  color:#fff;font-size:11px;font-weight:900;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;}
+.sblk-l{font-family:var(--fh);font-size:14px;font-weight:800;color:var(--text);}
+/* ── BARCODE ROW ── */
+.bcrow{display:flex;align-items:center;gap:8px;background:var(--surf2);
+  border:2px solid var(--border);border-radius:11px;padding:10px 13px;
+  transition:border-color .18s;}
+.bcrow.ok{border-color:var(--acc4);box-shadow:0 0 0 3px rgba(0,153,107,.1);}
+.bcrow.dup{border-color:var(--acc3)!important;background:rgba(214,48,64,.06)!important;}
+.bcrow input{flex:1;background:none;border:none;outline:none;color:var(--text);
+  font-family:var(--fb);font-size:13px;font-weight:700;letter-spacing:.4px;}
+.bcrow input::placeholder{color:var(--text3);font-weight:500;}
+.bcbtn{background:var(--g-blue);color:#fff;border:none;border-radius:8px;
+  padding:8px 13px;font-family:var(--fh);font-size:11px;font-weight:900;
+  cursor:pointer;white-space:nowrap;box-shadow:0 3px 10px rgba(0,119,204,.3);}
+/* ── PHOTO SLOTS ── */
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.pslot{aspect-ratio:1;border-radius:11px;border:2px dashed var(--border);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:5px;cursor:pointer;transition:all .18s;position:relative;
+  overflow:hidden;background:var(--surf2);}
+.pslot.ok{border-style:solid;border-color:var(--acc);}
+.pslot img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0;border-radius:9px;}
+.pslot-i{font-size:20px;opacity:.35;}
+.pslot-l{font-family:var(--fh);font-size:10px;color:var(--text3);letter-spacing:.3px;font-weight:800;}
+.pslot .dp{position:absolute;top:4px;right:4px;width:20px;height:20px;
+  background:rgba(214,48,64,.9);border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:9px;color:#fff;border:none;cursor:pointer;z-index:5;}
+.pslot .mt{position:absolute;bottom:3px;left:3px;background:rgba(0,119,204,.9);
+  color:#fff;padding:2px 6px;border-radius:4px;font-size:8px;font-weight:900;}
+.subBtn{width:100%;padding:16px;border-radius:var(--r);background:var(--g-blue);
+  color:#fff;font-family:var(--fh);font-size:16px;font-weight:900;border:none;
+  cursor:pointer;transition:all .18s;box-shadow:0 4px 16px rgba(0,119,204,.3);letter-spacing:.2px;}
+.subBtn:disabled{opacity:.4;cursor:not-allowed;box-shadow:none;}
+.subBtn:active{transform:scale(.97);}
+.hidden-file{display:none;}
+/* ── AUDIT ── */
+.audit-scan-zone{margin:14px 20px 0;background:var(--surf);border:2px solid var(--border);
+  border-radius:var(--r);padding:24px 20px;text-align:center;}
+.asz-ico{font-size:44px;margin-bottom:12px;}
+.asz-ttl{font-family:var(--fh);font-size:17px;font-weight:900;color:var(--text);}
+.asz-sub{font-size:12px;color:var(--text2);margin-top:5px;line-height:1.7;font-weight:600;}
+.asz-btn{margin-top:16px;background:var(--g-blue);color:#fff;border:none;
+  border-radius:13px;padding:14px 36px;font-family:var(--fh);font-size:15px;
+  font-weight:900;cursor:pointer;box-shadow:0 4px 16px rgba(0,119,204,.3);}
+.aud-result{margin:14px 20px 0;border-radius:var(--r);overflow:hidden;border:2px solid var(--acc);display:none;}
+.aud-result.show{display:block;}
+.ar-img{width:100%;height:130px;object-fit:cover;background:var(--surf2);}
+.ar-ph{width:100%;height:100px;background:var(--surf2);display:flex;align-items:center;
+  justify-content:center;font-size:44px;flex-direction:column;gap:6px;}
+.ar-ph-lbl{font-family:var(--fh);font-size:11px;color:var(--acc3);letter-spacing:1px;font-weight:900;}
+/* ── AUDIT PHOTO RETAKE ── */
+.ar-img-zone{position:relative;display:block;overflow:hidden;}
+.ar-retake-bar{position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.55);
+  color:#fff;font-size:10px;font-weight:800;text-align:center;padding:5px 0;
+  cursor:pointer;border:none;width:100%;letter-spacing:.5px;font-family:var(--fh);}
+.ar-retake-bar:hover,.ar-retake-bar:active{background:rgba(0,119,204,.75);}
+.ar-add-photo{width:100%;height:80px;background:var(--surf2);border:2px dashed var(--border);
+  display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;
+  border:none;font-size:12px;color:var(--text3);font-weight:700;font-family:var(--fh);}
+.ar-add-photo:hover{border-color:var(--acc);color:var(--acc);}
+
+.ar-body{padding:14px 16px;background:var(--surf);}
+.ar-ttl{font-family:var(--fh);font-size:11px;color:var(--acc);letter-spacing:.8px;
+  text-transform:uppercase;margin-bottom:6px;font-weight:800;}
+.ar-nm{font-family:var(--fh);font-size:19px;font-weight:900;color:var(--text);}
+.ar-cat{font-size:12px;color:var(--text2);margin-top:3px;font-weight:600;}
+.ar-ctrl-rows{margin-top:10px;margin-bottom:14px;}
+.ar-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);}
+.ar-k{font-size:12px;color:var(--text3);font-weight:600;}
+.ar-v{font-size:12px;color:var(--text);font-weight:800;text-align:right;max-width:55%;}
+.ar-locked{font-size:10px;color:var(--text3);background:var(--surf2);padding:2px 7px;border-radius:4px;margin-left:5px;}
+.ar-edit-hdr{display:flex;align-items:center;gap:8px;background:rgba(0,119,204,.07);
+  border:1px solid rgba(0,119,204,.2);border-radius:11px;padding:11px 14px;margin-bottom:13px;}
+.ar-edit-hdr span:nth-child(2){font-family:var(--fh);font-size:13px;color:var(--acc);font-weight:800;flex:1;}
+.ar-edit-sub{font-size:11px;color:var(--text3);font-weight:600;}
+.ar-edit-body{display:flex;flex-direction:column;gap:11px;margin-bottom:14px;}
+.ar-ef-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.ar-ef,.ar-ef-full{display:flex;flex-direction:column;gap:5px;}
+.ar-ef-lbl{font-family:var(--fh);font-size:11px;color:var(--text2);letter-spacing:.6px;text-transform:uppercase;font-weight:800;}
+.ar-ef-inp{width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;
+  padding:10px 13px;color:var(--text);font-size:13px;font-weight:700;outline:none;
+  transition:border-color .18s;appearance:none;}
+.ar-ef-inp:focus{border-color:var(--acc);}
+.ar-ef-inp::placeholder{color:var(--text3);}
+.ar-ef-ta{resize:none;line-height:1.6;}
+.ar-acts{display:flex;gap:9px;margin-top:4px;}
+.ar-btn{flex:1;padding:13px;border-radius:13px;border:none;font-family:var(--fh);
+  font-size:12px;font-weight:900;cursor:pointer;transition:all .18s;}
+.ar-btn.p{background:var(--g-blue);color:#fff;box-shadow:0 3px 12px rgba(0,119,204,.25);}
+.ar-btn.s{background:var(--surf2);color:var(--text);border:2px solid var(--border);}
+.ar-btn.w{background:rgba(214,48,64,.1);color:var(--acc3);border:1px solid rgba(214,48,64,.25);}
+.ar-btn.y{background:rgba(224,136,0,.1);color:var(--acc2);border:1px solid rgba(224,136,0,.25);}
+.aud-prog{margin:14px 20px 0;background:var(--surf);border:2px solid var(--border);border-radius:var(--r);padding:16px;}
+.ap-ttl{font-family:var(--fh);font-size:15px;font-weight:900;color:var(--text);}
+.pbar-wrap{margin-top:12px;}
+.pbar-top{display:flex;justify-content:space-between;margin-bottom:5px;}
+.pbar-top span{font-family:var(--fh);font-size:11px;color:var(--text2);font-weight:700;}
+.pbar{height:7px;background:var(--surf3);border-radius:4px;overflow:hidden;}
+.pfill{height:100%;border-radius:4px;background:var(--g-blue);transition:width .8s ease;}
+.astats{display:flex;gap:10px;margin-top:12px;}
+.astat{flex:1;text-align:center;}
+.astat-v{font-family:var(--fh);font-size:22px;font-weight:900;color:var(--text);}
+.astat-l{font-family:var(--fh);font-size:11px;color:var(--text3);margin-top:2px;font-weight:700;}
+.aud-list{padding:0 20px 24px;margin-top:10px;display:flex;flex-direction:column;gap:7px;}
+.aud-item{background:var(--surf);border:2px solid var(--border);border-radius:var(--r-sm);
+  padding:11px 14px;display:flex;align-items:center;gap:10px;}
+.aud-th{width:40px;height:40px;border-radius:10px;object-fit:cover;flex-shrink:0;}
+.aud-th-ph{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:18px;flex-shrink:0;background:var(--surf2);}
+.aud-inf{flex:1;}
+.aud-nm{font-family:var(--fh);font-size:13px;color:var(--text);font-weight:800;}
+.aud-bc{font-size:11px;color:var(--text3);margin-top:2px;font-weight:600;}
+.aud-chk{width:24px;height:24px;border-radius:50%;border:2px solid var(--border);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .18s;}
+.aud-chk.done{background:var(--g-blue);border-color:var(--acc);color:#fff;font-size:12px;font-weight:900;}
+/* ── SPOOL ── */
+.spool-card{margin:14px 20px 0;background:var(--surf);border:2px solid var(--border);border-radius:var(--r);padding:18px;}
+.spool-ttl{font-family:var(--fh);font-size:16px;font-weight:900;color:var(--text);}
+.spool-sub{font-size:12px;color:var(--text2);margin-top:4px;line-height:1.7;font-weight:600;}
+.spool-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:14px 20px;}
+.sp-btn{padding:18px 12px;border-radius:var(--r);border:2px solid;font-family:var(--fh);
+  font-size:12px;cursor:pointer;font-weight:900;
+  display:flex;flex-direction:column;align-items:center;gap:6px;transition:all .18s;}
+.sp-btn:active{transform:scale(.95);}
+.sp-btn .si{font-size:26px;}
+.sp1{background:rgba(0,119,204,.1);color:var(--acc);border-color:rgba(0,119,204,.25);}
+.sp2{background:rgba(0,153,107,.1);color:var(--acc4);border-color:rgba(0,153,107,.25);}
+.sp3{background:rgba(110,62,196,.1);color:var(--acc5);border-color:rgba(110,62,196,.25);}
+.sp4{background:rgba(224,136,0,.1);color:var(--acc2);border-color:rgba(224,136,0,.25);}
+/* ── SCANNER ── */
+.scan-ov{position:fixed;inset:0;z-index:80;display:none;flex-direction:column;background:#000;}
+.scan-ov.open{display:flex;}
+/* ── TORCH BUTTON ── */
+.torch-btn{background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.25);
+  border-radius:50%;width:40px;height:40px;font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0;}
+.torch-btn.on{background:rgba(255,220,0,.25);border-color:rgba(255,220,0,.7);}
+.torch-btn:active{transform:scale(.9);}
+.so-hdr{flex-shrink:0;padding:14px 18px 12px;display:flex;align-items:center;
+  justify-content:space-between;background:rgba(0,0,0,.8);}
+.so-ttl{font-family:var(--fh);font-size:17px;font-weight:900;color:#fff;}
+.so-close{background:rgba(255,255,255,.1);border:none;color:#fff;font-size:18px;
+  width:38px;height:38px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.so-vidwrap{flex:1;position:relative;overflow:hidden;}
+video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;display:block;background:#000;}
+.so-frame{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:2;}
+.so-box{width:70%;aspect-ratio:3/1.4;position:relative;}
+.soc{position:absolute;width:28px;height:28px;border-color:var(--acc);border-style:solid;}
+.soc.tl{top:0;left:0;border-width:3px 0 0 3px;}
+.soc.tr{top:0;right:0;border-width:3px 3px 0 0;}
+.soc.bl{bottom:0;left:0;border-width:0 0 3px 3px;}
+.soc.br{bottom:0;right:0;border-width:0 3px 3px 0;}
+.so-line{position:absolute;left:4px;right:4px;height:2px;
+  background:linear-gradient(90deg,transparent,var(--acc),transparent);
+  animation:sc 2s ease-in-out infinite;top:0;}
+@keyframes sc{0%,100%{top:4%;opacity:1;}50%{top:90%;opacity:.35;}}
+.so-status{position:absolute;bottom:0;left:0;right:0;padding:8px 10px;text-align:center;
+  font-size:12px;font-weight:700;color:rgba(255,255,255,.85);
+  background:linear-gradient(transparent,rgba(0,0,0,.7));pointer-events:none;z-index:2;}
+.scan-loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:#000;flex-direction:column;gap:14px;z-index:3;}
+.scan-loader.hidden{display:none;}
+.scan-loader-spinner{width:42px;height:42px;border:3px solid rgba(0,119,204,.25);
+  border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.scan-loader-txt{font-family:var(--fh);font-size:13px;color:rgba(255,255,255,.5);letter-spacing:.5px;font-weight:700;}
+.cam-err-card{position:absolute;inset:0;z-index:4;background:rgba(5,20,40,.97);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center;gap:12px;}
+.cam-err-ico{font-size:44px;opacity:.5;}
+.cam-err-ttl{font-family:var(--fh);font-size:18px;font-weight:900;color:#fff;}
+.cam-err-steps{font-size:12px;color:rgba(255,255,255,.55);line-height:1.9;font-weight:600;}
+.cam-err-retry{margin-top:14px;background:var(--g-blue);color:#fff;border:none;
+  border-radius:11px;padding:13px 30px;font-family:var(--fh);font-size:13px;font-weight:900;cursor:pointer;}
+.so-manual{flex-shrink:0;padding:12px 16px 28px;background:rgba(5,20,40,.95);
+  display:flex;gap:8px;border-top:1px solid rgba(255,255,255,.06);}
+.so-manual .fi{flex:1;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.1);color:#fff;font-size:13px;}
+.so-manual .fi::placeholder{color:rgba(255,255,255,.25);}
+.so-go{background:var(--g-blue);color:#fff;border:none;border-radius:10px;
+  padding:12px 17px;font-family:var(--fh);font-size:13px;font-weight:900;cursor:pointer;white-space:nowrap;}
+/* ── TOAST / SAVING ── */
+.toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%) translateY(8px);
+  background:var(--surf3);color:var(--text);padding:11px 20px;border-radius:11px;
+  font-family:var(--fh);font-size:12px;font-weight:800;opacity:0;transition:all .25s;
+  pointer-events:none;white-space:nowrap;border:2px solid var(--border);z-index:99;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.toast.ok{border-color:var(--acc4);color:var(--acc4);background:rgba(0,153,107,.1);}
+.toast.err{border-color:var(--acc3);color:var(--acc3);background:rgba(214,48,64,.1);}
+.toast.warn{border-color:var(--acc2);color:var(--acc2);background:rgba(224,136,0,.1);}
+.toast.info{border-color:var(--acc5);color:var(--acc5);background:rgba(110,62,196,.1);}
+.saving-overlay{position:fixed;inset:0;background:rgba(0,80,160,.35);z-index:150;
+  display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;}
+.saving-overlay.show{display:flex;}
+.saving-spinner{width:48px;height:48px;border:4px solid rgba(0,119,204,.2);
+  border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;}
+.saving-txt{font-family:var(--fh);font-size:14px;font-weight:900;color:#fff;}
+/* ── EMPTY STATE ── */
+.empty{text-align:center;padding:48px 20px;}
+.empty-i{font-size:42px;margin-bottom:14px;}
+.empty-t{font-family:var(--fh);font-size:18px;font-weight:900;color:var(--text);}
+.empty-s{font-size:12px;color:var(--text3);margin-top:6px;line-height:1.8;font-weight:600;}
+/* ── CONFIG NOTICE ── */
+.cfg-notice{margin:14px 20px;background:rgba(0,119,204,.07);border:2px solid rgba(0,119,204,.2);
+  border-radius:var(--r);padding:16px;}
+.cfg-notice-ttl{font-family:var(--fh);font-size:13px;color:var(--acc);font-weight:900;margin-bottom:6px;}
+.cfg-notice-body{font-size:12px;color:var(--text2);line-height:1.9;font-weight:600;}
+.cfg-notice-body code{background:var(--surf2);padding:2px 7px;border-radius:4px;font-size:11px;color:var(--acc2);}
+/* ── BADGES ── */
+.badge{display:inline-block;font-family:var(--fh);font-size:11px;font-weight:900;
+  padding:3px 9px;border-radius:6px;letter-spacing:.3px;}
+.ba{background:rgba(0,119,204,.12);color:var(--acc);}
+.bm{background:rgba(224,136,0,.12);color:var(--acc2);}
+.bd{background:rgba(214,48,64,.12);color:var(--acc3);}
+.bu{background:rgba(0,153,107,.12);color:var(--acc4);}
+.br{background:rgba(224,136,0,.12);color:var(--acc2);}
+.bs{background:rgba(110,62,196,.12);color:var(--acc5);}
+/* ── UTILITY ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,80,160,.4);z-index:500;
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal-box{background:var(--surf);border:2px solid var(--border);border-radius:20px;
+  width:100%;max-width:440px;max-height:88vh;overflow-y:auto;padding:24px;}
+.modal-ttl{font-family:var(--fh);font-size:20px;font-weight:900;color:var(--text);
+  margin-bottom:18px;letter-spacing:-.2px;}
+.modal-acts{display:flex;gap:10px;margin-top:20px;}
+.f3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+@media(max-width:380px){.f3{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN ══ -->
+<div id="login-screen">
+  <div class="ls-logo">AssetTrack<em>Pro</em></div>
+  <div class="ls-sub">FIELD OPERATIONS</div>
+  <div class="ls-field">
+    <div class="ls-lbl">Username</div>
+    <input class="ls-inp" type="text" id="ls-user" placeholder="e.g. field.officer" autocapitalize="none">
+  </div>
+  <div class="ls-field">
+    <div class="ls-lbl">Password</div>
+    <input class="ls-inp" type="password" id="ls-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+  </div>
+  <button class="ls-btn" onclick="doLogin()">Sign In →</button>
+  <div class="ls-err" id="ls-err"></div>
+  <div class="gps-stamp" id="login-gps-stamp"></div>
+  <div class="ls-role">Admin? <a href="admin.html">Go to Admin Portal →</a></div>
+</div>
+
+<!-- ── Tenant Lockout Screen ─────────────────────────────── -->
+<div id="lockout-screen" class="lockout-overlay">
+  <div class="ls-logo" style="margin-bottom:18px;">AssetTrack<em>Pro</em></div>
+  <div class="ls-sub" style="margin-bottom:16px;">FIELD OPERATIONS</div>
+  <div class="lock-icon" id="lock-icon-el">🔒</div>
+  <div class="lock-title" id="lock-title-el">Account Suspended</div>
+  <div class="lock-company" id="lock-company-el"></div>
+  <div class="lock-msg" id="lock-msg-el">Your organisation's AssetTrackPro account has been suspended.</div>
+  <div class="lock-contact">
+    <div class="lock-contact-lbl">To Reactivate, Contact</div>
+    <div class="lock-contact-val">Skyrit Technologies Admin</div>
+  </div>
+  <div class="lock-footer">AssetTrackPro &middot; Powered by Skyrit Technologies</div>
+</div>
+
+<div class="app" id="main-app" style="display:none;">
+  <div class="screens">
+
+    <!-- HOME -->
+    <div class="screen active" id="s-home">
+      <div class="dh">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div class="dh-lbl">Field Operations</div>
+            <div class="dh-ttl">AssetTrack<em>Pro</em></div>
+            <div class="dh-user" id="dh-user">Loading…</div>
+            <div class="dh-gps" id="dh-gps">📍 <span id="dh-gps-txt">Locating…</span></div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+            <button onclick="toggleTheme()" id="theme-btn" title="Toggle light/dark" style="background:var(--surf2);border:1px solid var(--border);border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">🌙</button>
+            <button onclick="showFieldErrLog()" id="field-err-badge" style="display:none;background:var(--acc3);border:none;border-radius:50%;width:36px;height:36px;font-size:11px;font-weight:700;color:#fff;cursor:pointer;align-items:center;justify-content:center;flex-shrink:0;">⚠</button>
+          </div>
+        </div>
+      </div>
+      <div class="kgrid">
+        <div class="kpi c1"><div class="ki">📦</div><div class="kl">My Captures</div><div class="kv" id="k-cap">0</div><div class="ks">this session</div></div>
+        <div class="kpi c2"><div class="ki">✅</div><div class="kl">Audited</div><div class="kv" id="k-aud">0</div><div class="ks">this cycle</div></div>
+        <div class="kpi c3"><div class="ki">⚠️</div><div class="kl">Flagged</div><div class="kv" id="k-flag">0</div><div class="ks">issues</div></div>
+        <div class="kpi c4"><div class="ki">☁️</div><div class="kl">Sync</div><div class="kv" id="k-sync" style="font-size:14px;">—</div><div class="ks">cloud status</div></div>
+      </div>
+      <div class="sec"><div class="sec-t">Quick Actions</div></div>
+      <div class="qagrid">
+        <button class="qa prime" onclick="go('register')"><div class="qa-i">📷</div><div class="qa-l">Scan & Register Asset</div></button>
+        <button class="qa" onclick="go('audit')"><div class="qa-i">🔍</div><div class="qa-l">Scan to Audit</div></button>
+        <button class="qa" onclick="go('spool')"><div class="qa-i">📤</div><div class="qa-l">Share My Spool</div></button>
+        <button class="qa" onclick="go('history');renderHistory()"><div class="qa-i">📋</div><div class="qa-l">My History</div></button>
+        <button class="qa" id="sync-btn" onclick="syncPendingAssets()" style="position:relative;"><div class="qa-i">🔄</div><div class="qa-l">Sync Offline</div><span id="sync-pending-badge" style="display:none;position:absolute;top:4px;right:4px;background:var(--acc2);color:#0a1e38;border-radius:10px;font-size:9px;font-weight:700;padding:1px 5px;"></span></button>
+        <button class="qa" onclick="doLogout()"><div class="qa-i">🚪</div><div class="qa-l">Sign Out</div></button>
+      </div>
+      <div id="cfg-notice-wrap"></div>
+      <!-- Rejection notice - assets rejected by admin needing correction -->
+      <div class="rejection-notice" id="rejection-notice">
+        <div class="rejection-notice-ttl">&#x274C; Assets Rejected &#x2014; Correction Required</div>
+        <div id="rejection-notice-list"></div>
+      </div>
+      <!-- Expiry warning banner — shown when company licence is expiring within 30 days -->
+      <div class="field-expiry-banner" id="field-expiry-banner">
+        <div class="field-expiry-banner-ttl" id="field-expiry-ttl">⏰ Licence Expiring Soon</div>
+        <div class="field-expiry-banner-msg" id="field-expiry-msg"></div>
+      </div>
+      <div style="height:20px;"></div>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="screen" id="s-register">
+      <div class="shdr">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div class="hbtn" onclick="go('home')">←</div>
+          <div class="shdr-ttl">Register Asset</div>
+        </div>
+        <div class="hbtn" id="save-indicator" style="color:var(--text3);font-size:10px;">Cloud ☁</div>
+      </div>
+      <div class="fbody" id="reg-fbody">
+
+        <div id="audit-reg-banner-wrap"></div>
+
+        <!-- Step 1: Barcode -->
+        <div class="sblk">
+          <div class="sblk-hd"><div class="sblk-n">1</div><div class="sblk-l">Scan Barcode Tag</div></div>
+          <div class="fl"><span>Barcode / Asset Tag</span><span class="req">REQUIRED</span></div>
+          <div class="bcrow" id="bcrow">
+            <span style="font-size:15px;color:var(--text3);">▦</span>
+            <input type="text" id="bc-inp" placeholder="Tap SCAN or type manually">
+            <button class="bcbtn" onclick="openScanner('reg')">📷 SCAN</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Photos -->
+        <div class="sblk">
+          <div class="sblk-hd"><div class="sblk-n">2</div><div class="sblk-l">Asset Photos <span class="req" style="font-size:9px;">MIN 1</span></div></div>
+          <div class="pgrid" id="pgrid">
+            <div class="pslot" id="ps0" onclick="trigP(0)"><span class="pslot-i">📷</span><span class="pslot-l">MAIN</span><span class="pslot-retake">🔄 RETAKE</span></div>
+            <div class="pslot" id="ps1" onclick="trigP(1)"><span class="pslot-i">➕</span><span class="pslot-l">ADD</span><span class="pslot-retake">🔄 RETAKE</span></div>
+            <div class="pslot" id="ps2" onclick="trigP(2)"><span class="pslot-i">➕</span><span class="pslot-l">ADD</span><span class="pslot-retake">🔄 RETAKE</span></div>
+          </div>
+          <input type="file" class="hidden-file" id="pf0" accept="image/*" onchange="handleP(event,0)">
+          <input type="file" class="hidden-file" id="pf1" accept="image/*" onchange="handleP(event,1)">
+          <input type="file" class="hidden-file" id="pf2" accept="image/*" onchange="handleP(event,2)">
+          <div style="font-size:10px;color:var(--text3);margin-top:8px;">Photos are compressed and uploaded to cloud storage.</div>
+        </div>
+
+        <!-- Step 3: Classification -->
+        <div class="sblk">
+          <div class="sblk-hd"><div class="sblk-n">3</div><div class="sblk-l">3-Level Classification</div></div>
+          <div class="fg">
+            <label class="fl"><span>Level 1 — Category</span><span class="req">REQUIRED</span></label>
+            <select class="fi" id="f-cat" onchange="onCat()">
+              <option value="">Select category…</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="fl"><span>Level 2 — Sub-Category</span><span class="req">REQUIRED</span></label>
+            <select class="fi" id="f-subcat" disabled onchange="onSubcat()">
+              <option value="">Select category first…</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="fl"><span>Level 3 — Asset Name</span><span class="req">REQUIRED</span></label>
+            <select class="fi" id="f-name" disabled>
+              <option value="">Select sub-category first…</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Step 4: Details — Location and Department SEPARATE -->
+        <div class="sblk">
+          <div class="sblk-hd"><div class="sblk-n">4</div><div class="sblk-l">Asset Details</div></div>
+
+          <!-- LOCATION — Physical place -->
+          <div class="fg">
+            <label class="fl">Physical Location <span style="font-size:9px;color:var(--text3);">(WHERE it is)</span></label>
+            <select class="fi" id="f-loc">
+              <option value="">Select location…</option>
+            </select>
+          </div>
+
+          <!-- DEPARTMENT — Organisational unit -->
+          <div class="fg">
+            <label class="fl">Department / Cost Centre <span style="font-size:9px;color:var(--text3);">(WHO owns it)</span></label>
+            <select class="fi" id="f-dept">
+              <option value="">Select department…</option>
+            </select>
+          </div>
+
+          <div class="fr">
+            <div class="fg">
+              <label class="fl">Status</label>
+              <select class="fi" id="f-status"><option value="">Select status…</option></select>
+            </div>
+            <div class="fg">
+              <label class="fl">Condition</label>
+              <select class="fi" id="f-cond"><option value="">Select condition…</option></select>
+            </div>
+          </div>
+          <div class="fr">
+            <div class="fg"><label class="fl">Serial No. <span class="req">REQUIRED</span></label><input class="fi" type="text" id="f-serial" placeholder="SN-XXXXX"></div>
+          </div>
+          <div class="fg"><label class="fl">Custodian <span class="req">REQUIRED</span></label><input class="fi" type="text" id="f-cust" placeholder="Assigned officer name"></div>
+          
+          <div class="fg"><label class="fl">Notes</label><input class="fi" type="text" id="f-notes" placeholder="Remarks, observations…"></div>
+          <!-- Custom fields injected here by renderCustomFieldInputs() -->
+          <div id="cf-inputs-wrap"></div>
+        </div>
+
+        <button class="subBtn" id="reg-submit-btn" onclick="saveAsset()">Upload & Save to Cloud →</button>
+      </div>
+    </div>
+
+    <!-- AUDIT -->
+    <div class="screen" id="s-audit">
+      <div class="shdr">
+        <div class="shdr-ttl">Audit by Scan</div>
+        <div class="hbtn" onclick="resetAudit()">↺ Reset</div>
+      </div>
+      <div class="audit-scan-zone">
+        <div class="asz-ico">▦</div>
+        <div class="asz-ttl">Scan Asset to Audit</div>
+        <div class="asz-sub">Scan the barcode tag on any asset. The app checks the database and prompts you to verify or update it.</div>
+        <button class="asz-btn" onclick="openScanner('audit')">📷 Open Scanner</button>
+      </div>
+      <div class="aud-result" id="aud-result">
+        <div id="ar-img-wrap"></div>
+        <input type="file" id="aud-pf-cam" accept="image/*" capture="environment" style="display:none" onchange="handleAuditPhoto(event,'cam')">
+        <input type="file" id="aud-pf-gal" accept="image/*" style="display:none" onchange="handleAuditPhoto(event,'gal')">
+        <div class="ar-body">
+          <div class="ar-ttl" id="ar-ttl-lbl">▦ ASSET FOUND</div>
+          <div class="ar-nm" id="ar-nm">—</div>
+          <div class="ar-cat" id="ar-cat">—</div>
+          <div class="ar-ctrl-rows" id="ar-ctrl-rows"></div>
+          <div class="ar-edit-hdr" id="ar-edit-hdr" style="display:none;">
+            <span style="font-size:16px;">✏️</span>
+            <span>Update Fields</span>
+            <span class="ar-edit-sub">Changes saved to cloud</span>
+          </div>
+          <div class="ar-edit-body" id="ar-edit-body" style="display:none;">
+            <div class="ar-ef-row">
+              <div class="ar-ef"><label class="ar-ef-lbl">Condition</label>
+                <select class="ar-ef-inp" id="aud-cond"><option value="">Select condition…</option></select></div>
+              <div class="ar-ef"><label class="ar-ef-lbl">Status</label>
+                <select class="ar-ef-inp" id="aud-status"><option value="">Select status…</option></select></div>
+            </div>
+            <div class="ar-ef-full"><label class="ar-ef-lbl">Physical Location</label>
+              <select class="ar-ef-inp" id="aud-loc"><option value="">— No change —</option></select></div>
+            <div class="ar-ef-full"><label class="ar-ef-lbl">Department</label>
+              <select class="ar-ef-inp" id="aud-dept"><option value="">— No change —</option></select></div>
+            <div class="ar-ef-full"><label class="ar-ef-lbl">Custodian</label>
+              <input class="ar-ef-inp" type="text" id="aud-cust" placeholder="Assigned officer"></div>
+            <div class="ar-ef-full"><label class="ar-ef-lbl">Audit Remarks</label>
+              <textarea class="ar-ef-inp ar-ef-ta" id="aud-notes" placeholder="Field observations…" rows="3"></textarea></div>
+          </div>
+          <div class="ar-acts" id="ar-acts"></div>
+        </div>
+      </div>
+      <div class="aud-prog">
+        <div class="ap-ttl">Audit Progress</div>
+        <div class="pbar-wrap">
+          <div class="pbar-top"><span>Verified</span><span id="aud-pct">0%</span></div>
+          <div class="pbar"><div class="pfill" id="aud-bar" style="width:0%"></div></div>
+        </div>
+        <div class="astats">
+          <div class="astat"><div class="astat-v" id="av">0</div><div class="astat-l">Verified</div></div>
+          <div class="astat"><div class="astat-v" id="ap">0</div><div class="astat-l">Pending</div></div>
+          <div class="astat"><div class="astat-v" id="am" style="color:var(--acc3);">0</div><div class="astat-l">Flagged</div></div>
+        </div>
+      </div>
+      <div class="aud-list" id="aud-list"></div>
+    </div>
+
+    <!-- SPOOL -->
+    <div class="screen" id="s-spool">
+      <div class="shdr"><div class="shdr-ttl">My Spool</div></div>
+      <div class="spool-card">
+        <div class="spool-ttl">Session Summary</div>
+        <div class="spool-sub">Assets registered and audited in your current session. Share this spool with your supervisor or sync to cloud.</div>
+        <div class="kgrid" style="padding:12px 0 0;">
+          <div class="kpi c1"><div class="kl">Registered</div><div class="kv" id="sp-reg">0</div></div>
+          <div class="kpi c2"><div class="kl">Audited</div><div class="kv" id="sp-aud">0</div></div>
+        </div>
+      </div>
+      <div class="spool-grid">
+        <button class="sp-btn sp1" onclick="spoolCSV()"><span class="si">📄</span>Export CSV<span style="font-size:9px;opacity:.7;">My captures</span></button>
+        <button class="sp-btn sp2" onclick="spoolShare()"><span class="si">📤</span>Share Report<span style="font-size:9px;opacity:.7;">WhatsApp / Email</span></button>
+        <button class="sp-btn sp3" onclick="spoolPhotoReport()"><span class="si">🖼️</span>Photo Report<span style="font-size:9px;opacity:.7;">With images</span></button>
+        <button class="sp-btn sp4" onclick="spoolPrint()"><span class="si">🖨️</span>Print / PDF<span style="font-size:9px;opacity:.7;">Browser print</span></button>
+      </div>
+      <div style="padding:0 20px 24px;" id="spool-list"></div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Nav -->
+  <div class="bnav">
+    <button class="nb on" id="nb-home" onclick="go('home')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span>Home</span>
+    </button>
+    <button class="nb" id="nb-register" onclick="go('register')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg><span>Register</span>
+    </button>
+    <button class="nb" id="nb-audit" onclick="go('audit')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg><span>Audit</span>
+    </button>
+    <button class="nb" id="nb-spool" onclick="go('spool')">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>Spool</span>
+    </button>
+  </div>
+
+</div>
+
+<!-- Global overlays - outside main-app so accessible before login -->
+<div class="toast" id="toast-el"></div>
+<div class="saving-overlay" id="saving-overlay">
+  <div class="saving-spinner"></div>
+  <div class="saving-txt" id="saving-txt">Saving to cloud…</div>
+</div>
+
+<!-- Scanner -->
+<div class="scan-ov" id="scan-ov">
+  <div class="so-hdr">
+    <div class="so-ttl" id="so-ttl">Scan Barcode</div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="torch-btn" id="torch-btn" onclick="toggleTorch()" title="Toggle flashlight" style="display:none;">🔦</button>
+      <button class="so-close" onclick="closeScanner()">✕</button>
+    </div>
+  </div>
+  <div class="so-vidwrap">
+    <video id="scanvid" autoplay playsinline muted></video>
+    <canvas id="scancanvas" style="display:none;"></canvas>
+    <div class="so-frame"><div class="so-box">
+      <div class="soc tl"></div><div class="soc tr"></div>
+      <div class="soc bl"></div><div class="soc br"></div>
+      <div class="so-line"></div>
+    </div></div>
+    <div class="so-status" id="so-status">ALIGN BARCODE WITHIN FRAME</div>
+    <div class="scan-loader" id="scan-loader">
+      <div class="scan-loader-spinner"></div>
+      <div class="scan-loader-txt" id="scan-loader-txt">STARTING CAMERA…</div>
+    </div>
+  </div>
+  <div class="so-manual">
+    <input class="fi" type="text" id="so-inp" placeholder="Or type barcode manually…">
+    <button class="so-go" onclick="manualScan()">OK</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// SUPABASE CONFIGURATION
+// Replace these with your own Supabase project values
+// Get them from: https://supabase.com → Project Settings → API
+// ══════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://qeqiwcypmeexihqbvweu.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFlcWl3Y3lwbWVleGlocWJ2d2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxMzg2NjYsImV4cCI6MjA4ODcxNDY2Nn0.7VEzqq18zlqul2HXDuskRXs4ideHAodbvibGxTaBOF4';
+const CONFIGURED = SUPABASE_URL !== 'YOUR_SUPABASE_URL';
+
+// ── Supabase REST helper (no SDK needed) ──
+const sb = {
+  // Columns that exist in the assets table — strip anything else before insert/update
+  ASSET_COLS:['id','barcode','company_id','name','category','sub_category','location',
+    'department','status','condition','custodian','serial','notes','photos',
+    'registered_by','last_audit_date','last_audit_by','last_audit_changes',
+    'approval_status','approval_comment','approved_by','approved_at',
+    'created_at','updated_at',
+    'capture_lat','capture_lng','capture_location'],
+  cleanAsset(data){
+    const out={};
+    this.ASSET_COLS.forEach(k=>{ if(k in data) out[k]=data[k]; });
+    return out;
+  },
+  async query(table, params=''){
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}${params}`,{
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json'}
+    });
+    const body=await r.json();
+    if(!r.ok) throw new Error((body&&body.message)||JSON.stringify(body));
+    return body;
+  },
+  async insert(table, data){
+    const payload=(table==='assets')?this.cleanAsset(data):data;
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}`,{
+      method:'POST',
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=representation'},
+      body:JSON.stringify(payload)
+    });
+    const body=await r.json();
+    if(!r.ok) throw new Error((body&&body.message)||JSON.stringify(body));
+    return body;
+  },
+  async update(table, id, data){
+    const payload=(table==='assets')?this.cleanAsset(data):data;
+    const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`,{
+      method:'PATCH',
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=representation'},
+      body:JSON.stringify(payload)
+    });
+    const body=await r.json();
+    if(!r.ok) throw new Error((body&&body.message)||JSON.stringify(body));
+    return body;
+  },
+  async uploadPhoto(bucket, path, blob){
+    const r=await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`,{
+      method:'POST',
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':blob.type||'image/jpeg'},
+      body:blob
+    });
+    const d=await r.json();
+    if(!r.ok) throw new Error('Storage: '+(d.message||d.error||r.status));
+    return d.Key?`${SUPABASE_URL}/storage/v1/object/public/${d.Key}`:null;
+  }
+};
+
+// ══════════════════════════════════════════════════════
+// AUTH — simple username/password against users table
+// In production use Supabase Auth (supabase.com/docs/guides/auth)
+// ══════════════════════════════════════════════════════
+let currentUser=null;
+let sessionAssets=[];  // assets registered THIS session
+let sessionAudit=[];   // assets audited THIS session
+let sessionFlags=[];
+// GPS captured at login — written to every asset at save time
+let currentGPS={lat:'',lng:'',label:''};
+
+// Demo users stored in localStorage until Supabase is configured
+// ══════════════════════════════════════════════════════
+// ASSET APPROVAL WORKFLOW — Field Side
+// ══════════════════════════════════════════════════════
+
+async function checkRejectedAssets(){
+  if(!CONFIGURED||!currentUser)return;
+  try{
+    var companyId=currentUser.company_id||null;
+    var q='?approval_status=eq.rejected&registered_by=eq.'+encodeURIComponent(currentUser.username)+'&select=id,barcode,name,approval_comment,created_at';
+    if(companyId) q+='&company_id=eq.'+companyId;
+    var rejected=await sb.query('assets',q);
+    if(!Array.isArray(rejected)||!rejected.length){
+      var n=document.getElementById('rejection-notice');
+      if(n)n.classList.remove('visible');
+      return;
+    }
+    var list=document.getElementById('rejection-notice-list');
+    if(list){
+      list.innerHTML=rejected.map(function(a){
+        return '<div class="rn-item">'+
+          '<div class="rn-name">'+a.name+'</div>'+
+          '<div class="rn-bc">&#x25A3; '+a.barcode+'</div>'+
+          (a.approval_comment?'<div class="rn-comment">&#x1F4AC; '+a.approval_comment+'</div>':'')+
+          '<button class="rn-fix-btn" onclick="openResubmitAsset(\''+a.id+'\')">Fix &amp; Resubmit &#x2192;</button>'+
+        '</div>';
+      }).join('');
+    }
+    var notice=document.getElementById('rejection-notice');
+    if(notice)notice.classList.add('visible');
+  }catch(e){}
+}
+
+async function openResubmitAsset(id){
+  try{
+    var asset=null;
+    if(CONFIGURED){
+      var res=await sb.query('assets','?id=eq.'+encodeURIComponent(id)+'&select=*');
+      if(Array.isArray(res)&&res.length)asset=res[0];
+    }
+    if(!asset){toast('Could not load asset data','err');return;}
+    go('register');
+    setTimeout(function(){
+      var bcInp=document.getElementById('bc-inp');
+      if(bcInp){bcInp.value=asset.barcode;bcInp.readOnly=true;bcInp.style.opacity='.6';}
+      var bcBtn=document.querySelector('#s-register .bcbtn');
+      if(bcBtn){bcBtn.disabled=true;bcBtn.style.opacity='.4';bcBtn.title='Barcode locked during resubmission';}
+      var catEl=document.getElementById('f-cat');
+      if(catEl){catEl.value=asset.category||'';onCat();}
+      var subEl=document.getElementById('f-subcat');
+      if(subEl){subEl.value=asset.sub_category||'';onSubcat();}
+      var nmEl=document.getElementById('f-name');if(nmEl)nmEl.value=asset.name||'';
+      var locEl=document.getElementById('f-loc');if(locEl)locEl.value=asset.location||'';
+      var deptEl=document.getElementById('f-dept');if(deptEl)deptEl.value=asset.department||'';
+      var stEl=document.getElementById('f-status');if(stEl)stEl.value=asset.status||'';
+      var condEl=document.getElementById('f-cond');if(condEl)condEl.value=asset.condition||'';
+      var serialEl=document.getElementById('f-serial');if(serialEl)serialEl.value=asset.serial||'';
+      var custEl=document.getElementById('f-cust');if(custEl)custEl.value=asset.custodian||'';
+      var notesEl=document.getElementById('f-notes');if(notesEl)notesEl.value=asset.notes||'';
+      window._resubmitAssetId=id;
+      window._resubmitBarcode=asset.barcode;
+      var existing=document.getElementById('resubmit-banner');
+      if(!existing){
+        var banner=document.createElement('div');
+        banner.id='resubmit-banner';
+        banner.style.cssText='background:rgba(214,48,64,.08);border:2px solid rgba(214,48,64,.2);border-radius:10px;padding:10px 14px;margin:0 20px 12px;font-size:11px;color:var(--acc3);font-weight:700;';
+        banner.innerHTML='&#x270F;&#xFE0F; Resubmitting rejected asset &mdash; fix the issues below and tap Save to resubmit for review.';
+        var fbody=document.querySelector('#s-register .fbody');
+        if(fbody)fbody.insertBefore(banner,fbody.firstChild);
+      }
+      var shdrEl=document.querySelector('#s-register .shdr-ttl');
+      if(shdrEl)shdrEl.textContent='Fix & Resubmit Asset';
+      toast('Form pre-filled — fix the issues and resubmit','info');
+    },320);
+  }catch(e){toast('Error loading asset: '+e.message,'err');}
+}
+
+async function resubmitAsset(patchData){
+  var id=window._resubmitAssetId;
+  if(!id)return false;
+  patchData.approval_status='pending';
+  patchData.approval_comment=null;
+  patchData.approved_by=null;
+  patchData.approved_at=null;
+  patchData.updated_at=new Date().toISOString();
+  if(CONFIGURED){
+    try{
+      await sb.update('assets',id,sb.cleanAsset(patchData));
+      updateHistoryApprovalStatus(id,'pending',null);
+      window._resubmitAssetId=null;
+      window._resubmitBarcode=null;
+      var rb=document.getElementById('resubmit-banner');if(rb)rb.remove();
+      var shdrEl=document.querySelector('#s-register .shdr-ttl');if(shdrEl)shdrEl.textContent='Register Asset';
+      var bcInp=document.getElementById('bc-inp');if(bcInp){bcInp.readOnly=false;bcInp.style.opacity='';}
+      var bcBtn=document.querySelector('#s-register .bcbtn');if(bcBtn){bcBtn.disabled=false;bcBtn.style.opacity='';bcBtn.title='';}
+      checkRejectedAssets();
+      return true;
+    }catch(e){toast('Resubmit failed: '+e.message,'err');return false;}
+  }
+  return false;
+}
+
+function updateHistoryApprovalStatus(assetId,status,comment){
+  try{
+    var key='atp_history_'+(currentUser?currentUser.username:'unknown');
+    var hist=JSON.parse(localStorage.getItem(key)||'[]');
+    var idx=hist.findIndex(function(a){return a.id===assetId;});
+    if(idx>=0){hist[idx].approval_status=status;hist[idx].approval_comment=comment||null;}
+    localStorage.setItem(key,JSON.stringify(hist));
+  }catch(e){}
+}
+
+
+const DEMO_USERS=[
+  {username:'field.officer',password:'field123',name:'Field Officer',role:'field'},
+  {username:'auditor',password:'audit123',name:'Lead Auditor',role:'field'},
+];
+
+// ══════════════════════════════════════════════════════
+// TENANT ACCESS ENFORCEMENT
+// ══════════════════════════════════════════════════════
+
+// Show full-screen lockout overlay. reason: 'suspended' | 'expired'
+function showLockout(companyName, reason){
+  const loginScr=document.getElementById('login-screen');
+  if(loginScr) loginScr.classList.add('hidden');
+  hideSaving();
+  const overlay=document.getElementById('lockout-screen');
+  if(!overlay) return;
+  const iconEl =document.getElementById('lock-icon-el');
+  const titleEl=document.getElementById('lock-title-el');
+  const coEl   =document.getElementById('lock-company-el');
+  const msgEl  =document.getElementById('lock-msg-el');
+  if(reason==='expired'){
+    if(iconEl)  iconEl.textContent='⏰';
+    if(titleEl) titleEl.textContent='Licence Expired';
+    if(msgEl)   msgEl.textContent='Your organisation\'s AssetTrackPro licence has expired. Please contact Skyrit Technologies Admin to renew and reactivate your access.';
+  } else {
+    if(iconEl)  iconEl.textContent='🔒';
+    if(titleEl) titleEl.textContent='Account Suspended';
+    if(msgEl)   msgEl.textContent='Your organisation\'s AssetTrackPro account has been suspended. Please contact Skyrit Technologies Admin for reactivation.';
+  }
+  if(coEl) coEl.textContent=companyName||'';
+  overlay.classList.add('active');
+}
+
+// Called after successful user auth. Returns true if access allowed, false if locked out.
+async function checkTenantAccessAtLogin(user){
+  if(!CONFIGURED||!user.company_id) return true;  // demo / no company — allow
+  try{
+    const coRes=await sb.query('companies',`?id=eq.${encodeURIComponent(user.company_id)}&select=id,name,active,access_type,access_expiry`);
+    if(!Array.isArray(coRes)||!coRes.length) return true;
+    const co=coRes[0];
+    const now=new Date();
+    const isExpired=co.access_type==='periodic'&&co.access_expiry&&new Date(co.access_expiry)<now;
+    if(isExpired){
+      showLockout(co.name,'expired');
+      return false;
+    }
+    if(co.active===false){
+      showLockout(co.name,'suspended');
+      return false;
+    }
+  }catch(e){
+    // Network error — fail open, don't block field officers on a connectivity blip
+    console.warn('checkTenantAccessAtLogin:',e.message);
+  }
+  return true;
+}
+
+// Runs after initApp. Checks if company is expiring within 30 days and shows in-app banner.
+async function checkFieldExpiryWarning(){
+  if(!CONFIGURED||!currentUser?.company_id) return;
+  try{
+    const coRes=await sb.query('companies',`?id=eq.${encodeURIComponent(currentUser.company_id)}&select=name,active,access_type,access_expiry`);
+    if(!Array.isArray(coRes)||!coRes.length) return;
+    const co=coRes[0];
+    if(co.access_type!=='periodic'||!co.access_expiry) return;
+    const now=new Date();
+    const diff=new Date(co.access_expiry)-now;
+    const THIRTY=30*24*60*60*1000;
+    if(diff>0&&diff<=THIRTY){
+      const days=Math.ceil(diff/(24*60*60*1000));
+      const urgent=days<=7;
+      const banner=document.getElementById('field-expiry-banner');
+      const ttl   =document.getElementById('field-expiry-ttl');
+      const msg   =document.getElementById('field-expiry-msg');
+      if(banner&&ttl&&msg){
+        ttl.textContent=urgent
+          ?`⚠️ Licence expires in ${days} day${days===1?'':'s'}!`
+          :`⏰ Licence expiring in ${days} day${days===1?'':'s'}`;
+        msg.textContent=`Your organisation's access expires on ${new Date(co.access_expiry).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}. Contact Skyrit Technologies Admin to renew.`;
+        banner.style.display='block';
+        if(urgent) banner.style.borderColor='rgba(214,48,64,.4)';
+      }
+    }
+  }catch(e){/* silent — non-critical */}
+}
+
+async function doLogin(){
+  const u=document.getElementById('ls-user').value.trim().toLowerCase();
+  const p=document.getElementById('ls-pass').value;
+  const errEl=document.getElementById('ls-err');
+  errEl.textContent='';
+  if(!u||!p){errEl.textContent='Please enter your username and password.';return;}
+  showSaving('Signing in…');
+  try{
+    if(CONFIGURED){
+      // Step 1: check username exists
+      let res;
+      try{res=await sb.query('users',`?username=eq.${encodeURIComponent(u)}&select=*`);}
+      catch(netErr){
+        hideSaving();errEl.textContent='⚠ Network error — check your connection and try again.';return;
+      }
+      if(!res||res.code){hideSaving();errEl.textContent='⚠ Network error — could not reach server.';return;}
+      if(!Array.isArray(res)||res.length===0){hideSaving();errEl.textContent='❌ User not found. Check your username.';return;}
+      const usr=res[0];
+      if(usr.password_hash!==p){hideSaving();errEl.textContent='🔑 Incorrect password. Try again.';return;}
+      if(usr.active===false){hideSaving();errEl.textContent='⛔ Account deactivated — contact your administrator.';return;}
+      if(usr.role==='admin'||usr.role==='super_owner'){hideSaving();errEl.textContent='⛔ Admin accounts must use the Admin Portal.';return;}
+      currentUser=usr;
+    } else {
+      const storedUsers=JSON.parse(localStorage.getItem('atp_users')||'[]');
+      const allDemoUsers=[...storedUsers,...DEMO_USERS];
+      const found=allDemoUsers.find(x=>x.username===u);
+      if(!found){hideSaving();errEl.textContent='❌ User not found. Check your username.';return;}
+      if(found.password_hash!==p&&found.password!==p){hideSaving();errEl.textContent='🔑 Incorrect password. Try again.';return;}
+      if(found.role==='admin'||found.role==='super_owner'){hideSaving();errEl.textContent='⛔ Admin accounts use the Admin Portal only.';return;}
+      if(found.active===false){hideSaving();errEl.textContent='⛔ Account deactivated — contact your administrator.';return;}
+      currentUser=found;
+    }
+    hideSaving();
+    // GPS stamp on successful login
+    captureLoginGPS();
+    // First-login intercept — force password change before app loads
+    if(currentUser.is_first_login===true||currentUser.is_first_login==='true'||currentUser.is_first_login===1){
+      document.getElementById('fcp-overlay').classList.add('open');
+      return;
+    }
+    // ── Tenant access gate ──────────────────────────
+    const allowed=await checkTenantAccessAtLogin(currentUser);
+    if(!allowed) return;  // showLockout() already called inside
+
+    completeLogin();
+  }catch(e){
+    hideSaving();errEl.textContent='⚠ Connection error — '+e.message;
+  }
+}
+
+let _pendingLoginUser=null; // holds user during first-login flow
+
+function captureLoginGPS(){
+  const stampEl=document.getElementById('login-gps-stamp');
+  const dhGps=document.getElementById('dh-gps');
+  const dhGpsTxt=document.getElementById('dh-gps-txt');
+  if(!navigator.geolocation){
+    if(stampEl)stampEl.textContent='';
+    return;
+  }
+  // Show "Locating…" on home screen immediately
+  if(dhGps){dhGps.style.display='flex';}
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const lat=pos.coords.latitude.toFixed(6);
+    const lng=pos.coords.longitude.toFixed(6);
+    let label=`${lat}, ${lng}`;
+    try{
+      const r=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+        {headers:{'Accept-Language':'en'}});
+      if(r.ok){const geo=await r.json();if(geo.display_name)label=geo.display_name.split(',').slice(0,3).join(',').trim();}
+    }catch(e){}
+    // Update login screen stamp
+    if(stampEl){stampEl.textContent='📍 '+label;stampEl.style.display='flex';}
+    // Update home screen GPS div
+    if(dhGpsTxt)dhGpsTxt.textContent=label;
+    if(dhGps)dhGps.style.display='flex';
+    // ── Store in module var so every asset captured this session carries GPS ──
+    currentGPS={lat,lng,label};
+    if(currentUser&&CONFIGURED){
+      try{await sb.insert('audit_log',{
+        asset_id:null,company_id:currentUser.company_id||null,
+        barcode:null,action:'LOGIN',
+        changes:JSON.stringify({lat,lng,location:label}),
+        audited_by:currentUser.username,
+        audited_at:new Date().toISOString(),
+        notes:'Field app login'
+      });}catch(e){}
+    }
+  },()=>{
+    // GPS denied — hide the home screen stamp
+    if(dhGps)dhGps.style.display='none';
+    if(stampEl)stampEl.textContent='';
+  },{timeout:8000,maximumAge:60000});
+}
+
+async function commitFirstLoginPassword(){
+  const np=document.getElementById('fcp-new').value;
+  const cp2=document.getElementById('fcp-confirm').value;
+  const errEl=document.getElementById('fcp-err');
+  errEl.textContent='';
+  if(!np||np.length<6){errEl.textContent='Password must be at least 6 characters.';return;}
+  if(np!==cp2){errEl.textContent='Passwords do not match.';return;}
+  if(CONFIGURED&&currentUser&&currentUser.id){
+    try{await sb.update('users',currentUser.id,{password_hash:np,is_first_login:false});}
+    catch(e){errEl.textContent='Save error: '+e.message;return;}
+  }
+  currentUser.password_hash=np;
+  currentUser.is_first_login=false;
+  document.getElementById('fcp-overlay').classList.remove('open');
+  toast('✅ Password updated — welcome!','ok');
+  completeLogin();
+}
+
+function completeLogin(){
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('main-app').style.display='flex';
+  initApp();
+}
+
+
+
+function doLogout(){
+  currentUser=null;sessionAssets=[];sessionAudit=[];sessionFlags=[];
+  // Reset lockout overlay so login screen is clean for next user
+  const lockout=document.getElementById('lockout-screen');
+  if(lockout) lockout.classList.remove('active');
+  // Reset in-app expiry banner
+  const banner=document.getElementById('field-expiry-banner');
+  if(banner){banner.style.display='none';banner.style.borderColor='';}
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('main-app').style.display='none';
+  document.getElementById('ls-pass').value='';
+  document.getElementById('ls-err').textContent='';
+  const gpsEl=document.getElementById('login-gps-stamp');
+  if(gpsEl){gpsEl.textContent='';gpsEl.style.display='none';}
+  const dhGps=document.getElementById('dh-gps');
+  if(dhGps)dhGps.style.display='none';
+  document.getElementById('fcp-overlay').classList.remove('open');
+}
+
+// ══════════════════════════════════════════════════════
+// PERMISSIONS — read from config, enforced in UI
+// ══════════════════════════════════════════════════════
+let PERMS = {
+  scan_register:true, audit_scan:true, view_own_spool:true,
+  edit_own_assets:false, delete_own_assets:false, edit_any_asset:false,
+  view_full_register:false, view_other_spools:false, view_asset_values:false,
+  export_reports:true, share_reports:true,
+  view_erp_status:false, manual_barcode:true, multi_photo:true,
+};
+
+async function loadAndApplyPerms(){
+  try{
+    if(CONFIGURED){
+      const res=await sb.query('config','?key=eq.permissions&select=value');
+      if(res&&res.length){
+        const all=JSON.parse(res[0].value);
+        const role=currentUser.role||'field';
+        if(all[role]) PERMS={...PERMS,...all[role]};
+      }
+    } else {
+      const stored=localStorage.getItem('atp_permissions');
+      if(stored){
+        const all=JSON.parse(stored);
+        const role=currentUser.role||'field';
+        if(all[role]) PERMS={...PERMS,...all[role]};
+      }
+    }
+  }catch(e){}
+  applyPermsToUI();
+}
+
+function applyPermsToUI(){
+  // Manual barcode entry bar in scanner
+  const manualBar=document.querySelector('.so-manual');
+  if(manualBar) manualBar.style.display=PERMS.manual_barcode?'flex':'none';
+
+  // Multi-photo slots — hide add slots if disabled
+  if(!PERMS.multi_photo){
+    ['ps1','ps2','pf1','pf2'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.style.display='none';
+    });
+    // Update grid to single column
+    const pg=document.getElementById('pgrid');
+    if(pg) pg.style.gridTemplateColumns='1fr';
+  }
+
+  // Spool export / share buttons
+  const spGrid=document.querySelector('.spool-grid');
+  if(spGrid){
+    const btns=spGrid.querySelectorAll('.sp-btn');
+    if(btns[0]&&!PERMS.export_reports) btns[0].style.display='none';
+    if(btns[1]&&!PERMS.share_reports)  btns[1].style.display='none';
+    if(btns[2]&&!PERMS.export_reports) btns[2].style.display='none';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// TAXONOMY & CONFIG — loaded from Supabase or defaults
+// ══════════════════════════════════════════════════════
+const DEFAULT_TAXONOMY={
+  'IT Equipment':{'Computing Devices':['Desktop Computer','Laptop Computer','Tablet','Workstation'],'Servers & Network':['Server (Rack)','Network Switch','Router','Firewall','Access Point'],'Printing':['Printer (Laser)','Printer (Inkjet)','Multifunction Printer','Scanner'],'Display':['Monitor (24")','Monitor (27")','Projector','Interactive Display']},
+  'Furniture':{'Seating':['Executive Chair','Standard Chair','Ergonomic Chair','Visitor Chair','Sofa'],'Desks & Tables':['Executive Desk','Work Desk','Conference Table (6)','Conference Table (12)','Reception Desk'],'Storage':['Filing Cabinet','Bookshelf','Safe / Vault','Storage Cabinet']},
+  'Vehicle':{'Passenger':['Saloon Car','SUV / Jeep','Mini Bus (14)','Bus (30)','Bus (50)'],'Commercial':['Pickup Truck','Delivery Van','Tipper Truck','Flatbed Truck'],'Special':['Ambulance','Forklift','Motorcycle','Golf Cart']},
+  'Machinery':{'Power':['Generator (5KVA)','Generator (10KVA)','Generator (20KVA)','Generator (60KVA)','Generator (100KVA)','Solar Panel Array'],'HVAC':['Air Conditioner (Split)','Air Conditioner (Cassette)','Industrial Fan'],'Pumps':['Borehole Pump','Water Pump','Water Treatment Plant']},
+  'Office Equipment':{'Communication':['Telephone Set','PABX System','Conference Phone','Intercom'],'Financial':['Cash Register','POS Terminal','Counting Machine'],'General':['Water Dispenser','Microwave','Coffee Maker','Shredder']},
+  'Medical Equipment':{'Diagnostic':['Patient Monitor','ECG Machine','Blood Pressure Monitor','Ultrasound Machine'],'Treatment':['Infusion Pump','Ventilator','Defibrillator','Autoclave'],'Patient Care':['Hospital Bed','Wheelchair','Operating Table']},
+  'Security Equipment':{'Detection':['Metal Detector (Walk-Through)','Metal Detector (Hand-Held)','Body Scanner'],'Surveillance':['CCTV Camera (Dome)','CCTV Camera (Bullet)','Video Recorder (DVR/NVR)'],'Access':['Biometric Scanner','Electric Gate Lock','Key Cabinet']},
+  'Other':{'Miscellaneous':['Miscellaneous Asset','Donated Item','Leased Equipment','Prototype']},
+};
+
+const DEFAULT_LOCATIONS=['Head Office — Main Building','Head Office — Annex','Branch Office — Lagos','Branch Office — Abuja','Warehouse A','Warehouse B','Server Room','Generator House','Fleet Yard','Workshop','Store Room','Reception Area','Boardroom','Other'];
+const DEFAULT_DEPARTMENTS=['Executive / Management','Finance & Accounts','Information Technology','Human Resources','Operations','Procurement','Legal & Compliance','Marketing','Customer Service','Facilities Management','Security','Internal Audit','Other'];
+
+let TAXONOMY=DEFAULT_TAXONOMY;
+let LOCATIONS=DEFAULT_LOCATIONS;
+let DEPARTMENTS=DEFAULT_DEPARTMENTS;
+let STATUS_OPTIONS=['Active','Maintenance','Disposed','Unverified'];
+let CONDITION_OPTIONS=['Excellent','Good','Fair','Poor'];
+
+const CAT_EMOJI={'IT Equipment':'💻','Furniture':'🪑','Vehicle':'🚗','Machinery':'⚙️','Office Equipment':'🖨️','Medical Equipment':'🩺','Security Equipment':'🔐','Other':'📦'};
+// Dynamic status badge class — cycles through classes for any custom status values
+const _BADGE_CLASSES=['ba','bm','bd','bu','bs','br'];
+function getStatCls(status){
+  const idx=STATUS_OPTIONS.indexOf(status);
+  return idx>=0?_BADGE_CLASSES[idx%_BADGE_CLASSES.length]:'bu';
+}
+
+// ══════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════
+async function initApp(){
+  document.getElementById('dh-user').textContent=
+    `${new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'long'})} · ${currentUser.name||currentUser.username}`;
+
+  // Check licence expiry and show in-app warning banner if within 30 days
+  checkFieldExpiryWarning();
+  // Check for rejected assets needing correction and show home screen notice
+  checkRejectedAssets();
+
+  const companyId=currentUser.company_id||null;
+  loadCustomFieldsForCompany(companyId);
+
+  // Load config scoped to user's company
+  if(CONFIGURED){
+    try{
+      // Load company name for display
+      if(companyId){
+        try{
+          const cos=await sb.query('companies',`?id=eq.${companyId}&select=name,industry`);
+          if(cos&&cos.length){
+            const co=cos[0];
+            document.getElementById('dh-user').textContent=
+              `${new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'long'})} · ${currentUser.name||currentUser.username} · ${co.name}`;
+          }
+        }catch(e){}
+      }
+      // Load company-scoped config
+      const q=companyId?`?company_id=eq.${companyId}&select=*`:'?select=*';
+      const cfg=await sb.query('config',q);
+      if(cfg&&cfg.length){
+        cfg.forEach(row=>{
+          if(row.key==='taxonomy'){
+            try{
+              const parsed=JSON.parse(row.value);
+              TAXONOMY=typeof parsed==='string'?JSON.parse(parsed):parsed;
+            }catch(e){}
+          }
+          if(row.key==='locations'){
+            try{
+              const parsed=JSON.parse(row.value);
+              LOCATIONS=typeof parsed==='string'?JSON.parse(parsed):parsed;
+            }catch(e){}
+          }
+          if(row.key==='departments'){
+            try{
+              const parsed=JSON.parse(row.value);
+              DEPARTMENTS=typeof parsed==='string'?JSON.parse(parsed):parsed;
+            }catch(e){}
+          }
+          if(row.key==='status_options'){
+            try{
+              const parsed=JSON.parse(row.value);
+              const arr=typeof parsed==='string'?JSON.parse(parsed):parsed;
+              if(Array.isArray(arr)&&arr.length)STATUS_OPTIONS=arr;
+            }catch(e){}
+          }
+          if(row.key==='condition_options'){
+            try{
+              const parsed=JSON.parse(row.value);
+              const arr=typeof parsed==='string'?JSON.parse(parsed):parsed;
+              if(Array.isArray(arr)&&arr.length)CONDITION_OPTIONS=arr;
+            }catch(e){}
+          }
+        });
+      }
+      document.getElementById('k-sync').textContent='Live';
+      document.getElementById('k-sync').style.color='var(--acc)';
+    }catch(e){
+      document.getElementById('k-sync').textContent='Offline';
+    }
+  } else {
+    // Demo mode — load company config from localStorage
+    if(companyId){
+      const t=localStorage.getItem('atp_taxonomy_'+companyId);
+      const l=localStorage.getItem('atp_locations_'+companyId);
+      const d=localStorage.getItem('atp_departments_'+companyId);
+      if(t) try{TAXONOMY=JSON.parse(t);}catch(e){}
+      if(l) try{LOCATIONS=JSON.parse(l);}catch(e){}
+      if(d) try{DEPARTMENTS=JSON.parse(d);}catch(e){}
+      const so=localStorage.getItem('atp_status_options_'+companyId);
+      const co=localStorage.getItem('atp_condition_options_'+companyId);
+      if(so)try{const p=JSON.parse(so);if(Array.isArray(p)&&p.length)STATUS_OPTIONS=p;}catch(e){}
+      if(co)try{const p=JSON.parse(co);if(Array.isArray(p)&&p.length)CONDITION_OPTIONS=p;}catch(e){}
+      // Show company name from localStorage companies list
+      const allCos=JSON.parse(localStorage.getItem('atp_companies')||'[]');
+      const myCo=allCos.find(c=>c.id===companyId);
+      if(myCo){
+        document.getElementById('dh-user').textContent=
+          `${new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'long'})} · ${currentUser.name||currentUser.username} · ${myCo.name}`;
+      }
+    }
+    showConfigNotice();
+    document.getElementById('k-sync').textContent='Demo';
+    document.getElementById('k-sync').style.color='var(--acc2)';
+  }
+
+  buildDropdowns();
+  buildAuditLocationDropdown();
+  await loadAndApplyPerms();
+  refreshDash();
+  updateSyncBadge();
+  // Auto-sync pending assets if online
+  const pending=getPendingQueue();
+  if(pending.length>0 && navigator.onLine){
+    const badge=document.getElementById('sync-pending-badge');
+    if(badge){badge.style.display='inline';badge.textContent=pending.length;}
+    toast(pending.length+' asset'+(pending.length>1?'s':'')+' pending sync — tap Sync Offline','warn');
+  }
+}
+
+function showConfigNotice(){
+  document.getElementById('cfg-notice-wrap').innerHTML=`
+    <div class="cfg-notice" style="margin-top:16px;">
+      <div class="cfg-notice-ttl">⚙ Demo Mode — Supabase Not Configured</div>
+      <div class="cfg-notice-body">
+        Assets save to browser storage only. To enable cloud sync:<br>
+        1. Create free account at <strong>supabase.com</strong><br>
+        2. Replace <code>YOUR_SUPABASE_URL</code> and <code>YOUR_SUPABASE_ANON_KEY</code> in both HTML files<br>
+        3. Run the SQL setup from the Admin portal
+      </div>
+    </div>`;
+}
+
+function buildDropdowns(){
+  const catSel=document.getElementById('f-cat');
+  catSel.innerHTML='<option value="">Select category…</option>';
+  Object.keys(TAXONOMY).forEach(c=>catSel.innerHTML+=`<option>${c}</option>`);
+  // Filter locations by user's assigned_locations (empty = all allowed)
+  const allowedLocs=getAssignedLocations();
+  const visibleLocs=allowedLocs.length?LOCATIONS.filter(l=>allowedLocs.includes(l)):LOCATIONS;
+  const locSel=document.getElementById('f-loc');
+  locSel.innerHTML='<option value="">Select location…</option>';
+  visibleLocs.forEach(l=>locSel.innerHTML+=`<option>${l}</option>`);
+  // Departments — no restriction
+  const deptSel=document.getElementById('f-dept');
+  deptSel.innerHTML='<option value="">Select department…</option>';
+  DEPARTMENTS.forEach(d=>deptSel.innerHTML+=`<option>${d}</option>`);
+  // Status & Condition — dynamic from config
+  buildStatusConditionDropdowns();
+}
+
+// Populate all status and condition dropdowns from the loaded arrays.
+// Called after config loads and whenever arrays change.
+function buildStatusConditionDropdowns(){
+  const statusOpts=STATUS_OPTIONS.map(s=>`<option>${s}</option>`).join('');
+  const condOpts=CONDITION_OPTIONS.map(c=>`<option>${c}</option>`).join('');
+  // Register form
+  const fSt=document.getElementById('f-status');
+  const fCo=document.getElementById('f-cond');
+  if(fSt){const cur=fSt.value;fSt.innerHTML=statusOpts;if(STATUS_OPTIONS.includes(cur))fSt.value=cur;else fSt.value=STATUS_OPTIONS[0]||'';}
+  if(fCo){const cur=fCo.value;fCo.innerHTML=condOpts;if(CONDITION_OPTIONS.includes(cur))fCo.value=cur;else fCo.value=CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'';}
+  // Audit form
+  const aSt=document.getElementById('aud-status');
+  const aCo=document.getElementById('aud-cond');
+  if(aSt){const cur=aSt.value;aSt.innerHTML=statusOpts;if(STATUS_OPTIONS.includes(cur))aSt.value=cur;}
+  if(aCo){const cur=aCo.value;aCo.innerHTML=condOpts;if(CONDITION_OPTIONS.includes(cur))aCo.value=cur;}
+}
+
+// Return array of locations the current user is restricted to.
+// Empty array means unrestricted (all locations).
+function getAssignedLocations(){
+  if(!currentUser)return[];
+  const al=currentUser.assigned_locations;
+  if(!al)return[];
+  if(Array.isArray(al))return al.filter(Boolean);
+  if(typeof al==='string'){
+    try{const parsed=JSON.parse(al);if(Array.isArray(parsed))return parsed.filter(Boolean);}catch(e){}
+    return al.split(',').map(l=>l.trim()).filter(Boolean);
+  }
+  return[];
+}
+
+function buildAuditLocationDropdown(){
+  const lSel=document.getElementById('aud-loc');
+  const dSel=document.getElementById('aud-dept');
+  lSel.innerHTML='<option value="">— No change —</option>';
+  // Also restrict audit location dropdown to assigned locations
+  const allowedLocs=getAssignedLocations();
+  const visibleLocs=allowedLocs.length?LOCATIONS.filter(l=>allowedLocs.includes(l)):LOCATIONS;
+  visibleLocs.forEach(l=>lSel.innerHTML+=`<option>${l}</option>`);
+  dSel.innerHTML='<option value="">— No change —</option>';
+  DEPARTMENTS.forEach(d=>dSel.innerHTML+=`<option>${d}</option>`);
+}
+
+function onCat(){
+  const cat=document.getElementById('f-cat').value;
+  const sub=document.getElementById('f-subcat');
+  const nm=document.getElementById('f-name');
+  sub.innerHTML='<option value="">Select sub-category…</option>';
+  nm.innerHTML='<option value="">Select sub-category first…</option>';
+  sub.disabled=true;nm.disabled=true;
+  if(!cat)return;
+  Object.keys(TAXONOMY[cat]||{}).forEach(s=>sub.innerHTML+=`<option>${s}</option>`);
+  sub.disabled=false;
+}
+function onSubcat(){
+  const cat=document.getElementById('f-cat').value;
+  const sub=document.getElementById('f-subcat').value;
+  const nm=document.getElementById('f-name');
+  nm.innerHTML='<option value="">Select asset name…</option>';
+  nm.disabled=true;
+  if(!cat||!sub)return;
+  (TAXONOMY[cat][sub]||[]).forEach(n=>nm.innerHTML+=`<option>${n}</option>`);
+  nm.disabled=false;
+}
+
+// ══════════════════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════════════════
+function go(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
+  document.getElementById('s-'+name).classList.add('active');
+  const nb=document.getElementById('nb-'+name);
+  if(nb)nb.classList.add('on');
+  if(name==='register')resetForm();
+  if(name==='spool')renderSpool();
+  if(name==='audit')renderAudit();
+  if(name==='history')renderHistory();
+}
+
+// ══════════════════════════════════════════════════════
+// PHOTOS — compress before upload
+// ══════════════════════════════════════════════════════
+let photos=[null,null,null]; // {blob, dataUrl}
+
+function trigP(i){choosePhotoSource(i);}
+function handleP(e,i){
+  const f=e.target.files[0];if(!f)return;
+  compressImage(f,640,0.65,({blob,dataUrl})=>{
+    photos[i]={blob,dataUrl};
+    const s=document.getElementById('ps'+i);
+    s.classList.add('ok','filled');
+    s.innerHTML=`<img src="${dataUrl}"><button class="dp" onclick="rmP(event,${i})">✕</button>${i===0?'<span class="mt">MAIN</span>':''}<span class="pslot-retake">🔄 RETAKE</span>`;
+  });
+}
+
+// Photo source chooser — shown when tapping a photo slot
+function choosePhotoSource(slotIndex){
+  // Build a temporary camera-only input and a gallery-only input
+  const sheet=document.createElement('div');
+  sheet.id='photo-sheet';
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+  sheet.innerHTML=`
+    <div style="background:var(--surf);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:20px;padding-bottom:34px;">
+      <div style="font-size:12px;color:var(--text3);text-align:center;margin-bottom:16px;text-transform:uppercase;letter-spacing:.8px;">Photo ${slotIndex===0?'(Main)':'(Additional)'}</div>
+      <button onclick="document.getElementById('pf-cam${slotIndex}').click()" style="width:100%;background:var(--acc);border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;color:#0a1e38;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:10px;">
+        📷 Take Photo
+      </button>
+      <button onclick="document.getElementById('pf-gal${slotIndex}').click()" style="width:100%;background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:14px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:10px;">
+        🖼 Choose from Gallery
+      </button>
+      <button onclick="document.getElementById('photo-sheet').remove()" style="width:100%;background:none;border:1px solid var(--border);border-radius:12px;padding:12px;font-size:13px;color:var(--text3);cursor:pointer;">
+        Cancel
+      </button>
+      <input type="file" id="pf-cam${slotIndex}" accept="image/*" capture="environment" style="display:none" onchange="handleP(event,${slotIndex});document.getElementById('photo-sheet').remove();">
+      <input type="file" id="pf-gal${slotIndex}" accept="image/*" style="display:none" onchange="handleP(event,${slotIndex});document.getElementById('photo-sheet').remove();">
+    </div>`;
+  document.body.appendChild(sheet);
+  sheet.addEventListener('click', e=>{ if(e.target===sheet) sheet.remove(); });
+}
+function rmP(e,i){
+  e.stopPropagation();
+  if(photos[i]&&photos[i].blob){try{URL.revokeObjectURL(photos[i].blob);}catch(err){}}
+  photos[i]=null;
+  const s=document.getElementById('ps'+i);
+  s.className='pslot'; // removes 'ok' and 'filled'
+  s.innerHTML=`<span class="pslot-i">${i===0?'📷':'➕'}</span><span class="pslot-l">${i===0?'MAIN':'ADD'}</span><span class="pslot-retake">🔄 RETAKE</span>`;
+  document.getElementById('pf'+i).value='';
+}
+
+// Image compression — this is the key fix for the storage problem
+// Resizes to maxWidth and compresses to JPEG quality
+function compressImage(file,maxWidth,quality,cb){
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=new Image();
+    img.onload=()=>{
+      const ratio=Math.min(1,maxWidth/img.width);
+      const w=Math.round(img.width*ratio);
+      const h=Math.round(img.height*ratio);
+      const canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      canvas.toBlob(blob=>{
+        // Read directly without creating an object URL (avoids memory leak)
+        const fr=new FileReader();
+        fr.onload=e2=>cb({blob,dataUrl:e2.target.result});
+        fr.readAsDataURL(blob);
+      },'image/jpeg',quality);
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ══════════════════════════════════════════════════════
+// SAVE ASSET — cloud first, localStorage fallback
+// ══════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════
+// ERROR LOG
+// ══════════════════════════════════════════════════════
+let FIELD_ERRORS=[];
+function logFieldErr(src,msg,detail){
+  FIELD_ERRORS.unshift({src,msg:msg||'',detail:detail||'',t:new Date().toLocaleTimeString()});
+  if(FIELD_ERRORS.length>50)FIELD_ERRORS.pop();
+  const badge=document.getElementById('field-err-badge');
+  if(badge){badge.textContent=FIELD_ERRORS.length;badge.style.display='flex';}
+  console.error('[ATP]',src,msg,detail||'');
+}
+function showFieldErrLog(){
+  const modal=document.getElementById('field-err-modal');
+  if(!modal)return;
+  modal.style.display='flex';
+  const body=document.getElementById('field-err-body');
+  if(!body)return;
+  body.innerHTML=FIELD_ERRORS.length
+    ?FIELD_ERRORS.map(e=>`<div style="border-bottom:1px solid var(--border);padding:8px 0;">
+        <div style="color:var(--acc3);font-size:10px;font-weight:700;">[${e.src}] ${e.t}</div>
+        <div style="color:var(--text);font-size:11px;margin-top:2px;">${e.msg}</div>
+        ${e.detail?`<div style="color:var(--text3);font-size:10px;margin-top:1px;word-break:break-all;">${e.detail}</div>`:''}
+      </div>`).join('')
+    :'<div style="color:var(--text3);text-align:center;padding:20px;font-size:12px;">No errors this session.</div>';
+}
+function hideFieldErrLog(){
+  const m=document.getElementById('field-err-modal');if(m)m.style.display='none';
+}
+function clearFieldErrLog(){
+  FIELD_ERRORS=[];
+  const badge=document.getElementById('field-err-badge');
+  if(badge)badge.style.display='none';
+  hideFieldErrLog();
+}
+
+// ══════════════════════════════════════════════════════
+// PERSISTENT HISTORY — survives logout/login
+// ══════════════════════════════════════════════════════
+function persistHistory(asset, cloudSaved){
+  try{
+    const uname=currentUser?currentUser.username:'unknown';
+    const key='atp_history_'+uname;
+    let hist=[];
+    try{hist=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
+    // Lightweight record — no photo blobs
+    hist.unshift({
+      id:asset.id, barcode:asset.barcode, name:asset.name,
+      category:asset.category, sub_category:asset.sub_category,
+      location:asset.location, department:asset.department,
+      status:asset.status, condition:asset.condition,
+      custodian:asset.custodian, serial:asset.serial,
+      registered_by:asset.registered_by, company_id:asset.company_id,
+      created_at:asset.created_at, cloud:cloudSaved,
+      approval_status:asset.approval_status||'pending',
+      approval_comment:asset.approval_comment||null,
+      capture_lat:asset.capture_lat||null,
+      capture_lng:asset.capture_lng||null,
+      capture_location:asset.capture_location||null,
+    });
+    if(hist.length>500)hist=hist.slice(0,500);
+    localStorage.setItem(key,JSON.stringify(hist));
+    updateSyncBadge();
+  }catch(e){}
+}
+
+function getMyHistory(){
+  try{
+    const uname=currentUser?currentUser.username:'unknown';
+    return JSON.parse(localStorage.getItem('atp_history_'+uname)||'[]');
+  }catch(e){return [];}
+}
+
+function updateSyncBadge(){
+  const hist=getMyHistory();
+  const cloudCount=hist.filter(a=>a.cloud).length;
+  const localCount=hist.filter(a=>!a.cloud).length;
+  const el=document.getElementById('k-sync');
+  if(!el)return;
+  if(hist.length===0){ el.textContent='—'; el.style.color=''; return; }
+  if(localCount===0){
+    el.textContent='✓ All synced';
+    el.style.color='var(--acc)';
+    el.style.fontSize='11px';
+  } else {
+    el.textContent=localCount+' pending';
+    el.style.color='var(--acc2)';
+    el.style.fontSize='12px';
+  }
+}
+
+// Fetches current approval_status + approval_comment for all history assets
+// from the DB and patches localStorage. Called every time History screen opens.
+async function refreshHistoryApprovals(){
+  if(!CONFIGURED||!navigator.onLine||!currentUser) return;
+  const uname=currentUser.username;
+  const hist=getMyHistory();
+  if(!hist.length) return;
+  try{
+    const res=await sb.query('assets',
+      '?registered_by=eq.'+encodeURIComponent(uname)+
+      '&select=id,barcode,approval_status,approval_comment,approved_by,approved_at'+
+      '&order=created_at.desc&limit=200');
+    if(!Array.isArray(res)||!res.length) return;
+    const map={};
+    res.forEach(r=>{ map[r.barcode]=r; });
+    let changed=false;
+    const updated=hist.map(a=>{
+      const cloud=map[a.barcode];
+      if(cloud && cloud.approval_status && cloud.approval_status!==a.approval_status){
+        changed=true;
+        return Object.assign({},a,{
+          approval_status:cloud.approval_status,
+          approval_comment:cloud.approval_comment||null,
+          approved_by:cloud.approved_by||null,
+          approved_at:cloud.approved_at||null,
+          cloud:true
+        });
+      }
+      return a;
+    });
+    if(changed){
+      localStorage.setItem('atp_history_'+uname,JSON.stringify(updated));
+    }
+  }catch(e){ console.warn('refreshHistoryApprovals:',e.message); }
+}
+
+function renderHistory(){
+  var el=document.getElementById('history-list');
+  if(!el)return;
+  // Trigger cloud refresh in background; re-render when it settles
+  refreshHistoryApprovals().then(()=>_renderHistoryUI()).catch(()=>_renderHistoryUI());
+}
+
+function _renderHistoryUI(){
+  var el=document.getElementById('history-list');
+  if(!el)return;
+  var hist=getMyHistory();
+  if(!hist.length){
+    el.innerHTML='<div class="empty"><div class="empty-i">&#x1F4CB;</div><div class="empty-t">No captures yet</div><div class="empty-s">Every asset you register appears here permanently, even after logout.</div></div>';
+    return;
+  }
+  var rejected=hist.filter(function(a){return a.approval_status==='rejected';}).length;
+  var approved=hist.filter(function(a){return a.approval_status==='approved';}).length;
+  var pending=hist.filter(function(a){return !a.approval_status||a.approval_status==='pending';}).length;
+  var rows=hist.map(function(a){
+    var apvS=a.approval_status||'pending';
+    var bgColor=apvS==='approved'?'rgba(0,153,107,.07)':apvS==='rejected'?'rgba(214,48,64,.06)':'var(--surf2)';
+    var borderColor=apvS==='approved'?'rgba(0,153,107,.22)':apvS==='rejected'?'rgba(214,48,64,.2)':'var(--border)';
+    var pillLabel=apvS==='approved'?'&#x2705; Approved':apvS==='rejected'?'&#x274C; Rejected':'&#x1F550; Pending';
+    var commentBlock=(apvS==='rejected'||apvS==='approved')&&a.approval_comment
+      ?'<div style="font-size:11px;color:'+(apvS==='rejected'?'var(--acc3)':'var(--acc4)')
+        +';margin-top:7px;padding:7px 10px;background:'+(apvS==='rejected'?'rgba(214,48,64,.06)':'rgba(0,153,107,.06)')
+        +';border-radius:7px;font-style:italic;line-height:1.45;">&#x1F4AC; <strong>'
+        +(apvS==='rejected'?'Rejection reason':'Note')+':</strong> '+a.approval_comment+'</div>':'';
+    var approvedByBlock=apvS==='approved'&&a.approved_by
+      ?'<div style="font-size:10px;color:var(--acc4);margin-top:5px;">&#x2713; Approved by <strong>'+a.approved_by+'</strong>'
+        +(a.approved_at?' &middot; '+new Date(a.approved_at).toLocaleDateString('en-GB'):'')+'</div>':'';
+    var fixBtn=apvS==='rejected'
+      ?'<button onclick="openResubmitAsset(\''+a.id+'\')" style="margin-top:8px;width:100%;background:var(--g-blue);color:#0a1e38;border:none;border-radius:8px;padding:7px;font-size:11px;font-weight:800;cursor:pointer;font-family:var(--fh);">&#x270F;&#xFE0F; Fix &amp; Resubmit &#x2192;</button>':'';
+    var gpsLine=a.capture_location
+      ?'<div style="font-size:9px;color:var(--text3);margin-top:3px;">&#x1F4CD; Captured at: '+a.capture_location+'</div>':'';
+    return '<div style="background:'+bgColor+';border:1px solid '+borderColor+';border-radius:12px;padding:12px 14px;margin-bottom:8px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
+        +'<div style="flex:1;min-width:0;">'
+          +'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+a.name+'</div>'
+          +'<div style="font-size:10px;color:var(--acc);font-family:monospace;margin-top:1px;">&#x25A3; '+a.barcode+'</div>'
+        +'</div>'
+        +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">'
+          +'<span style="font-size:9px;padding:3px 8px;border-radius:5px;'+(a.cloud?'background:rgba(0,200,160,.12);color:var(--acc)':'background:rgba(255,160,0,.12);color:var(--acc2)')+'">'+(a.cloud?'&#x2601; Cloud':'&#x1F4BE; Local')+'</span>'
+          +'<span class="apv-pill apv-'+apvS+'">'+pillLabel+'</span>'
+        +'</div>'
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;margin-top:7px;font-size:10px;color:var(--text2);">'
+        +'<div>&#x1F4CD; '+(a.location||'&#x2014;')+'</div><div>&#x1F3E2; '+(a.department||'&#x2014;')+'</div>'
+        +'<div>&#x1F4C1; '+(a.category||'')+(a.sub_category?' &rsaquo; '+a.sub_category:'')+'</div>'
+        +'<div>&#x1F464; '+(a.custodian||'&#x2014;')+'</div>'
+      +'</div>'
+      +gpsLine
+      +commentBlock
+      +approvedByBlock
+      +'<div style="font-size:9px;color:var(--text3);margin-top:5px;">'+(a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'&#x2014;')+'</div>'
+      +fixBtn
+    +'</div>';
+  }).join('');
+  el.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      +'<div style="font-size:11px;color:var(--text2);">'+hist.length+' total &middot; '+hist.filter(function(a){return a.cloud;}).length+' &#x2601; synced</div>'
+      +'<div style="display:flex;gap:8px;">'
+        +'<button onclick="exportHistoryCSV()" style="font-size:10px;background:var(--acc);border:none;border-radius:7px;padding:6px 12px;color:#0a1e38;font-weight:700;cursor:pointer;">&#x2B07; CSV</button>'
+        +'<button onclick="if(confirm(\'Clear all history?\')){localStorage.removeItem(\'atp_history_\'+(currentUser?currentUser.username:\'unknown\'));renderHistory();updateSyncBadge();}" style="font-size:10px;background:var(--surf2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text3);cursor:pointer;">Clear</button>'
+      +'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">'
+      +'<span class="apv-pill apv-pending">&#x1F550; '+pending+' Pending</span>'
+      +'<span class="apv-pill apv-approved">&#x2705; '+approved+' Approved</span>'
+      +(rejected?'<span class="apv-pill apv-rejected">&#x274C; '+rejected+' Rejected</span>':'')
+    +'</div>'
+    +rows;
+}
+
+// ──────────────────────────────────────────────────────
+// CROSS-PLATFORM FILE DOWNLOAD HELPER
+// Three-tier strategy for maximum mobile compatibility:
+//
+// Tier 1 — Web Share API with File object (best on mobile)
+//   iOS 15.1+, Android Chrome 89+, Samsung Internet 14+
+//   Opens the native OS share sheet → user picks
+//   "Save to Files" (iOS) or Downloads (Android).
+//   Most reliable on mobile — no blob URL involved.
+//
+// Tier 2 — Blob URL + deferred revokeObjectURL (desktop + modern mobile)
+//   Standard <a download> click. revokeObjectURL is
+//   deferred 300ms so the browser can read the blob
+//   before it is destroyed. Synchronous revoke (the
+//   original bug) destroys the blob before the browser
+//   fetches it — toast fires but file never appears.
+//
+// Tier 3 — window.open fallback (old iOS Safari)
+//   iOS Safari ignores the `download` attribute on
+//   blob: URLs entirely. Opens CSV as text in a new
+//   tab; user taps Share → Save to Files.
+// ──────────────────────────────────────────────────────
+function triggerDownload(csvContent, filename){
+  const content = '\uFEFF' + csvContent; // BOM for Excel
+  const blob = new Blob([content], {type:'text/csv;charset=utf-8;'});
+
+  // Tier 1: Web Share API with File — best on all mobile browsers
+  if(navigator.canShare){
+    try{
+      const file = new File([blob], filename, {type:'text/csv;charset=utf-8;'});
+      if(navigator.canShare({files:[file]})){
+        navigator.share({files:[file], title:filename})
+          .catch(function(err){
+            // User cancelled (AbortError) — do not fallback to download
+            // Any other error — fall through to Tier 2
+            if(err && err.name !== 'AbortError') blobDownload(blob, filename);
+          });
+        return;
+      }
+    }catch(e){}
+  }
+  blobDownload(blob, filename);
+}
+
+function blobDownload(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+
+  // Tier 2: <a download> — desktop + Android + modern iOS (17.4+)
+  if(typeof a.download !== 'undefined'){
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    // CRITICAL: deferred revoke — synchronous revoke destroys the blob
+    // before the browser reads it, causing silent failure with toast showing.
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
+  } else {
+    // Tier 3: window.open — old iOS Safari (ignores download attr on blob: URLs)
+    URL.revokeObjectURL(url); // clean up unused URL
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const w = window.open(e.target.result, '_blank');
+      if(!w) toast('Allow pop-ups to export, or use Share button','err');
+    };
+    reader.readAsDataURL(blob);
+  }
+}
+
+function exportHistoryCSV(){
+  const hist=getMyHistory();
+  if(!hist.length){toast('No history to export','err');return;}
+  const h=['Barcode','Asset Name','Category','Sub-Category','Location','Department',
+    'Status','Condition','Custodian','Serial','Notes',
+    'Approval Status','Approval Comment','Approved By','Approved At',
+    'GPS Latitude','GPS Longitude','GPS Location',
+    'Registered By','Date Captured','Cloud Synced'];
+  const rows=hist.map(a=>[
+    a.barcode, a.name, a.category||'', a.sub_category||'',
+    a.location||'', a.department||'', a.status||'', a.condition||'',
+    a.custodian||'', a.serial||'', a.notes||'',
+    a.approval_status||'pending', a.approval_comment||'',
+    a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
+    a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
+    a.registered_by||'',
+    a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
+    a.cloud?'Yes':'No'
+  ].map(v=>'\"'+String(v).replace(/"/g,'""')+'\"').join(','));
+  const filename='CaptureHistory_'+(currentUser?currentUser.username:'field')+'_'+new Date().toISOString().split('T')[0]+'.csv';
+  triggerDownload([h.join(','),...rows].join('\n'), filename);
+  toast('History exported \u2713','ok');
+}
+
+
+// ══════════════════════════════════════════════════════
+// OFFLINE SYNC QUEUE
+// ══════════════════════════════════════════════════════
+function addToPendingSync(asset){
+  try{
+    let q=JSON.parse(localStorage.getItem('atp_sync_queue')||'[]');
+    // Store full asset so it can be replayed
+    if(!q.find(a=>a.id===asset.id)) q.push(asset);
+    localStorage.setItem('atp_sync_queue',JSON.stringify(q));
+    updateSyncBadge();
+  }catch(e){}
+}
+
+function getPendingQueue(){
+  try{return JSON.parse(localStorage.getItem('atp_sync_queue')||'[]');}catch(e){return [];}
+}
+
+async function syncPendingAssets(){
+  const q=getPendingQueue();
+  if(!q.length){toast('No pending assets to sync','info');return;}
+  if(!navigator.onLine){toast('Still offline — cannot sync','err');return;}
+  
+  const syncBtn=document.getElementById('sync-btn');
+  if(syncBtn){syncBtn.disabled=true;syncBtn.textContent='Syncing…';}
+  
+  let synced=0, failed=0;
+  const remaining=[];
+  
+  for(const asset of q){
+    try{
+      showSaving('Syncing '+synced+'/'+q.length+'…');
+      const res=await sb.insert('assets',asset);
+      if(Array.isArray(res)){
+        synced++;
+        // Update history record to cloud=true
+        markHistoryCloud(asset.id);
+      } else {
+        failed++;
+        remaining.push(asset);
+        logFieldErr('syncPending','Sync failed for '+asset.barcode, JSON.stringify(res).slice(0,100));
+      }
+    }catch(e){
+      failed++;
+      remaining.push(asset);
+      logFieldErr('syncPending',e.message,'barcode='+asset.barcode);
+    }
+  }
+  
+  localStorage.setItem('atp_sync_queue',JSON.stringify(remaining));
+  hideSaving();
+  if(syncBtn){syncBtn.disabled=false;syncBtn.textContent='🔄 Sync Now';}
+  
+  updateSyncBadge();
+  if(synced>0) toast(synced+' asset'+(synced>1?'s':'')+' synced to cloud ✓','ok');
+  if(failed>0) toast(failed+' failed — tap ⚠ for details','err');
+}
+
+function markHistoryCloud(assetId){
+  try{
+    const uname=currentUser?currentUser.username:'unknown';
+    const key='atp_history_'+uname;
+    let hist=JSON.parse(localStorage.getItem(key)||'[]');
+    const idx=hist.findIndex(a=>a.id===assetId);
+    if(idx>=0){hist[idx].cloud=true;localStorage.setItem(key,JSON.stringify(hist));}
+  }catch(e){}
+}
+
+async function saveAsset(){
+  const bc=document.getElementById('bc-inp').value.trim();
+  const cat=document.getElementById('f-cat').value;
+  const sub=document.getElementById('f-subcat').value;
+  const nm=document.getElementById('f-name').value;
+  if(!bc){toast('Scan the barcode first','err');return;}
+  if(!cat){toast('Select a category','err');return;}
+  if(!sub){toast('Select a sub-category','err');return;}
+  if(!nm){toast('Select an asset name','err');return;}
+  const locVal=document.getElementById('f-loc').value;
+  const deptVal=document.getElementById('f-dept').value;
+  if(!locVal){toast('Location is mandatory — please select a location','err');return;}
+  if(!deptVal){toast('Department is mandatory — please select a department','err');return;}
+  const serialVal=document.getElementById('f-serial').value.trim();
+  const custodianVal=document.getElementById('f-cust').value.trim();
+  if(!serialVal){toast('Serial Number is required','err');document.getElementById('f-serial').focus();return;}
+  if(!custodianVal){toast('Custodian is required','err');document.getElementById('f-cust').focus();return;}
+  if(!photos[0]){toast('Main photo is mandatory','err');return;}
+  if(!validateCustomFields())return;
+
+  // ── Resubmission intercept ────────────────────────────────────────
+  // If this is a fix-and-resubmit of a rejected asset, PATCH instead of INSERT
+  if(window._resubmitAssetId){
+    var btn2=document.getElementById('reg-submit-btn');
+    if(btn2)btn2.disabled=true;
+    showSaving('Resubmitting for review\u2026');
+    var patchAsset={
+      barcode:bc,name:nm,category:cat,sub_category:sub,
+      location:document.getElementById('f-loc').value,
+      department:document.getElementById('f-dept').value,
+      status:(document.getElementById('f-status')||{}).value||'Active',
+      condition:(document.getElementById('f-cond')||{}).value||'Good',
+      serial:document.getElementById('f-serial').value.trim(),
+      custodian:document.getElementById('f-cust').value.trim(),
+      notes:(document.getElementById('f-notes')||{}).value||'',
+      registered_by:currentUser.username,
+      company_id:currentUser.company_id||null,
+    };
+    if(CONFIGURED&&navigator.onLine&&photos[0]){
+      showSaving('Uploading photos\u2026');
+      var uploadTasks=photos.map(function(p,i){
+        if(!p)return Promise.resolve(null);
+        var path='assets/'+(currentUser.company_id||'co')+'/'+bc+'_'+Date.now()+'_'+i+'.jpg';
+        return sb.uploadPhoto('asset-photos',path,p.blob).catch(function(){return p.dataUrl||null;});
+      });
+      var uploaded=await Promise.all(uploadTasks);
+      var urls=uploaded.filter(Boolean);
+      if(urls.length)patchAsset.photos=urls;
+    }
+    var ok=await resubmitAsset(patchAsset);
+    hideSaving();
+    if(btn2)btn2.disabled=false;
+    if(ok){toast('Resubmitted for review \u2713','ok');resetForm();setTimeout(function(){go('home');},600);}
+    return;
+  }
+
+  // ── Barcode duplicate check ──────────────────────────────────────
+  // Step 1: Always check current session first (catches rapid re-submissions
+  // before the first save has completed writing to Supabase)
+  const sessionDup=sessionAssets.find(a=>a.barcode===bc);
+  if(sessionDup){
+    toast(`Already registered this session: ${sessionDup.name||bc}`,'err');
+    document.getElementById('reg-submit-btn').disabled=false;
+    return;
+  }
+
+  if(CONFIGURED && navigator.onLine){
+    try{
+      // Online + configured: check Supabase for duplicates
+      // Use OR logic to catch both NULL company_id and matching company_id
+      const companyId=currentUser.company_id||null;
+      let query=`?barcode=eq.${encodeURIComponent(bc)}&select=id,name,company_id`;
+      const existing=await sb.query('assets',query);
+      if(existing&&existing.length){
+        // Filter client-side: match if same company OR if no company scoping
+        const match=existing.find(a=>
+          !companyId||          // no company on current user → match any
+          !a.company_id||       // asset has no company → treat as global
+          a.company_id===companyId // same company
+        );
+        if(match){
+          toast(`Barcode already registered: ${match.name||match.id}`,'err');
+          document.getElementById('reg-submit-btn').disabled=false;
+          return;
+        }
+      }
+    }catch(e){
+      // Cloud check failed unexpectedly while supposedly online — log but do NOT block
+      // Asset will still be checked against localStorage below, and queued for sync
+      logFieldErr('dupCheck',e.message,'barcode='+bc);
+      // Fall through to localStorage check
+    }
+  }
+  // Offline (or demo) mode — check localStorage + pending queue as the source of truth
+  // This runs: (a) when offline regardless of CONFIGURED, (b) in demo mode, (c) as fallback after cloud error
+  {
+    const allLocal=getLocalAssets();
+    const pending=JSON.parse(localStorage.getItem('atp_pending_sync')||'[]');
+    const allKnown=[...allLocal,...pending];
+    const companyId=currentUser.company_id||null;
+    const dup=allKnown.find(a=>
+      a.barcode===bc&&(!companyId||!a.company_id||a.company_id===companyId)
+    );
+    if(dup){toast(`Barcode already registered: ${dup.name||dup.id}`,'err');document.getElementById('reg-submit-btn').disabled=false;return;}
+    // If offline, warn the user the cloud could not be verified — but allow save
+    if(CONFIGURED && !navigator.onLine){
+      toast('📴 Offline — saving locally. Cloud duplicate check skipped.','warn');
+    }
+  }
+
+  const fromAudit=!!document.getElementById('audit-reg-banner');
+  const btn=document.getElementById('reg-submit-btn');
+  btn.disabled=true;
+  showSaving('Uploading photos…');
+
+  let photoUrls=[];
+  if(CONFIGURED && navigator.onLine){
+    // Upload photos — each independently so one failure doesn't kill the save
+    const uploadTasks=photos.map((p,i)=>{
+      if(!p)return Promise.resolve(null);
+      const path=`assets/${currentUser.company_id||'co'}/${bc}_${Date.now()}_${i}.jpg`;
+      return sb.uploadPhoto('asset-photos',path,p.blob).catch(photoErr=>{
+        logFieldErr('photoUpload','Photo '+(i+1)+' failed: '+photoErr.message,'barcode='+bc);
+        // Fall back to storing the dataUrl in the DB instead
+        return p.dataUrl||null;
+      });
+    });
+    const uploadResults=await Promise.all(uploadTasks);
+    photoUrls=uploadResults.filter(Boolean);
+  } else {
+    // Offline or demo — store as dataUrl (base64) in the record
+    photoUrls=photos.filter(Boolean).map(p=>p.dataUrl);
+  }
+
+  const asset={
+    id:'AT-'+Date.now(),
+    barcode:bc,
+    name:nm,
+    category:cat,
+    sub_category:sub,
+    location:document.getElementById('f-loc').value,
+    department:document.getElementById('f-dept').value||'Not specified',
+    status:document.getElementById('f-status').value,
+    condition:document.getElementById('f-cond').value,
+    custodian:document.getElementById('f-cust').value.trim(),
+    serial:document.getElementById('f-serial').value.trim(),
+    notes:document.getElementById('f-notes').value||'',
+    custom_fields:collectCustomFieldValues(),
+    photos:photoUrls,
+    registered_by:currentUser.username,
+    registered_from_audit:fromAudit,
+    approval_status:'pending',
+    company_id:currentUser.company_id||null,
+    created_at:new Date().toISOString(),
+    // GPS coordinates at time of capture (from captureLoginGPS)
+    capture_lat:currentGPS.lat||'',
+    capture_lng:currentGPS.lng||'',
+    capture_location:currentGPS.label||'',
+  };
+
+  showSaving('Saving to database…');
+
+  function finishSave(cloudOk, cloudErr){
+    // Always push to session spool regardless of cloud result
+    sessionAssets.push(asset);
+    if(fromAudit){
+      sessionAudit.push(asset.id);
+      asset.last_audit_date=new Date().toISOString();
+      asset.last_audit_changes='Registered and verified during audit';
+    }
+    // Persist to history so it survives logout
+    persistHistory(asset, cloudOk);
+    // Free photo memory
+    photos.forEach((p,i)=>{ if(p&&p.blob){try{URL.revokeObjectURL(p.blob);}catch(e){}} photos[i]=null; });
+    refreshDash();
+    hideSaving();
+    btn.disabled=false;
+    const banner=document.getElementById('audit-reg-banner');
+    if(banner)banner.remove();
+    if(cloudOk){
+      toast(fromAudit?'Registered & verified ✓':'☁ Saved — Pending Admin Approval 🕐','ok');
+      setTimeout(()=>go(fromAudit?'audit':'home'),600);
+    } else {
+      // Saved to localStorage pending queue — will sync when online
+      logFieldErr('saveAsset', cloudErr||'Cloud save failed', 'barcode='+asset.barcode);
+      toast('Saved locally — will sync when online','warn');
+      addToPendingSync(asset);
+      setTimeout(()=>go(fromAudit?'audit':'home'),800);
+    }
+  }
+
+  if(CONFIGURED && navigator.onLine){
+    try{
+      const res=await sb.insert('assets',asset);
+      // sb.insert now throws on HTTP error — success = array returned
+      if(Array.isArray(res)){
+        finishSave(true);
+      } else {
+        saveLocally(asset);
+        finishSave(false,'Unexpected response: '+JSON.stringify(res).slice(0,100));
+      }
+    }catch(e){
+      saveLocally(asset);
+      finishSave(false, e.message);
+    }
+  } else {
+    // Offline or not configured — save locally and queue for sync
+    saveLocally(asset);
+    finishSave(!CONFIGURED, CONFIGURED?'Device offline — queued for sync':null);
+  }
+}
+
+// localStorage fallback — stores in indexed slots to avoid single-key size limit
+function saveLocally(asset){
+  try{
+    const key='atp_asset_'+asset.id;
+    localStorage.setItem(key,JSON.stringify(asset));
+    // Keep an index
+    let idx=JSON.parse(localStorage.getItem('atp_index')||'[]');
+    idx.push(asset.id);
+    localStorage.setItem('atp_index',JSON.stringify(idx));
+  }catch(e){toast('Storage full — please sync to cloud','err');}
+}
+
+function getLocalAssets(){
+  try{
+    const idx=JSON.parse(localStorage.getItem('atp_index')||'[]');
+    return idx.map(id=>{
+      try{return JSON.parse(localStorage.getItem('atp_asset_'+id));}catch(e){return null;}
+    }).filter(Boolean);
+  }catch(e){return [];}
+}
+
+function resetForm(){
+  photos=[null,null,null];
+  ['bc-inp','f-cust','f-serial','f-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  // Always unlock barcode field + scan button (guard against navigating away mid-resubmit)
+  var bcInp=document.getElementById('bc-inp');if(bcInp){bcInp.readOnly=false;bcInp.style.opacity='';}
+  var bcBtn=document.querySelector('#s-register .bcbtn');if(bcBtn){bcBtn.disabled=false;bcBtn.style.opacity='';}
+  // Clear any in-flight resubmit state
+  window._resubmitAssetId=null;window._resubmitBarcode=null;
+  var rb=document.getElementById('resubmit-banner');if(rb)rb.remove();
+  var shdrEl=document.querySelector('#s-register .shdr-ttl');if(shdrEl)shdrEl.textContent='Register Asset';
+  document.getElementById('bcrow').classList.remove('ok');
+  document.getElementById('f-cat').value='';
+  ['f-subcat','f-name'].forEach(id=>{const el=document.getElementById(id);el.innerHTML='<option>Select first…</option>';el.disabled=true;});
+  document.getElementById('f-status').value=STATUS_OPTIONS[0]||'Active';
+  document.getElementById('f-cond').value=CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'Good';
+  for(let i=0;i<3;i++){
+    const s=document.getElementById('ps'+i);
+    s.className='pslot';
+    s.innerHTML=`<span class="pslot-i">${i===0?'📷':'➕'}</span><span class="pslot-l">${i===0?'MAIN':'ADD'}</span>`;
+    const f=document.getElementById('pf'+i);if(f)f.value='';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// AUDIT
+// ══════════════════════════════════════════════════════
+let currentAuditAsset=null;
+
+async function processAuditScan(bc){
+  showSaving('Looking up barcode…');
+  let asset=null;
+  if(CONFIGURED){
+    try{
+      const res=await sb.query('assets',`?barcode=eq.${encodeURIComponent(bc)}&select=*`);
+      if(res&&res.length)asset=res[0];
+    }catch(e){}
+  } else {
+    const local=getLocalAssets();
+    asset=local.find(a=>a.barcode===bc)||sessionAssets.find(a=>a.barcode===bc)||null;
+  }
+  hideSaving();
+  currentAuditAsset=asset;
+  showAuditResult(asset,bc);
+}
+
+function showAuditResult(a,bc){
+  const wrap=document.getElementById('aud-result');
+  const imgWrap=document.getElementById('ar-img-wrap');
+  const ttl=document.getElementById('ar-ttl-lbl');
+  const acts=document.getElementById('ar-acts');
+  const editHdr=document.getElementById('ar-edit-hdr');
+  const editBody=document.getElementById('ar-edit-body');
+
+  if(!a){
+    imgWrap.innerHTML=`<div class="ar-ph"><span style="font-size:38px;">❓</span><span class="ar-ph-lbl">NOT IN DATABASE</span></div>`;
+    ttl.textContent='▦ UNKNOWN BARCODE';ttl.style.color='var(--acc3)';
+    document.getElementById('ar-nm').textContent='Unregistered Asset';
+    document.getElementById('ar-cat').textContent='Scanned but not found in the register';
+    document.getElementById('ar-ctrl-rows').innerHTML=`
+      <div class="ar-row"><span class="ar-k">Scanned</span><span class="ar-v" style="color:var(--acc2);font-family:monospace;">${bc}</span></div>
+      <div class="ar-row"><span class="ar-k">Time</span><span class="ar-v">${new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span></div>`;
+    editHdr.style.display='none';editBody.style.display='none';
+    acts.innerHTML=`
+      <button class="ar-btn p" style="background:var(--acc2);color:#0a1e38;" onclick="registerFromAudit('${bc}')">➕ Register Now</button>
+      <button class="ar-btn w" onclick="logUnknown('${bc}')">⚑ Log Unknown</button>
+      <button class="ar-btn s" onclick="dismissAudit()">Dismiss</button>`;
+    wrap.classList.add('show');
+    setTimeout(()=>wrap.scrollIntoView({behavior:'smooth',block:'nearest'}),100);
+    return;
+  }
+
+  // Known asset
+  const img=a.photos&&a.photos[0];
+  if(img){
+    imgWrap.innerHTML=`<div class="ar-img-zone">
+      <img class="ar-img" src="${img}">
+      <button class="ar-retake-bar" onclick="openAuditPhotoSheet()">🔄 Retake / Replace Photo</button>
+    </div>`;
+  } else {
+    imgWrap.innerHTML=`<button class="ar-add-photo" onclick="openAuditPhotoSheet()">
+      <span style="font-size:20px;">📷</span> Tap to Add Photo
+    </button>`;
+  }
+  ttl.textContent='▦ ASSET FOUND — VERIFY & UPDATE';ttl.style.color='var(--acc)';
+  document.getElementById('ar-nm').textContent=a.name;
+  document.getElementById('ar-cat').textContent=(a.category||'')+(a.sub_category?' › '+a.sub_category:'');
+  document.getElementById('ar-ctrl-rows').innerHTML=[
+    ['Barcode',a.barcode],['Serial',a.serial||'—'],
+    ['Registered',a.created_at?new Date(a.created_at).toLocaleDateString('en-GB'):'—'],
+  ].map(([k,v])=>`<div class="ar-row"><span class="ar-k">${k}<span class="ar-locked">LOCKED</span></span><span class="ar-v">${v}</span></div>`).join('');
+
+  // Pre-fill editable fields
+  document.getElementById('aud-cond').value=a.condition||(CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'Good');
+  document.getElementById('aud-status').value=a.status||(STATUS_OPTIONS[0]||'Active');
+  document.getElementById('aud-loc').value=a.location||'';
+  document.getElementById('aud-dept').value=a.department||'';
+  document.getElementById('aud-cust').value=a.custodian||'';
+  document.getElementById('aud-notes').value='';
+  editHdr.style.display='flex';editBody.style.display='flex';
+  acts.innerHTML=`
+    <button class="ar-btn p" onclick="confirmAudit()">✓ Confirm & Save</button>
+    <button class="ar-btn w" onclick="flagAsset()">⚠ Flag Issue</button>
+    <button class="ar-btn s" onclick="dismissAudit()">Cancel</button>`;
+  wrap.classList.add('show');
+  setTimeout(()=>wrap.scrollIntoView({behavior:'smooth',block:'nearest'}),100);
+}
+
+async function confirmAudit(){
+  if(!currentAuditAsset){toast('No asset loaded','err');return;}
+  const a=currentAuditAsset;
+  const updates={
+    condition:document.getElementById('aud-cond').value,
+    status:document.getElementById('aud-status').value,
+    last_audit_date:new Date().toISOString(),
+    last_audit_by:currentUser.username,
+  };
+  const newLoc=document.getElementById('aud-loc').value;
+  const newDept=document.getElementById('aud-dept').value;
+  const newCust=document.getElementById('aud-cust').value.trim();
+  const notes=document.getElementById('aud-notes').value.trim();
+  if(newLoc)updates.location=newLoc;
+  if(newDept)updates.department=newDept;
+  if(newCust)updates.custodian=newCust;
+  if(notes){const stamp=new Date().toLocaleDateString('en-GB');updates.notes=(a.notes?a.notes+' | ':'')+'['+stamp+']: '+notes;}
+
+  showSaving('Saving audit to cloud…');
+  if(CONFIGURED){
+    try{await sb.update('assets',a.id,updates);}catch(e){toast('Audit saved locally only','err');}
+  }
+  hideSaving();
+  if(!sessionAudit.includes(a.id))sessionAudit.push(a.id);
+  toast('✓ '+a.name+' verified','ok');
+  dismissAudit();
+  renderAudit();
+  refreshDash();
+}
+
+function flagAsset(){
+  if(!currentAuditAsset)return;
+  if(!sessionFlags.includes(currentAuditAsset.id))sessionFlags.push(currentAuditAsset.id);
+  toast('⚠ Issue flagged','err');
+  dismissAudit();renderAudit();refreshDash();
+}
+
+function openAuditPhotoSheet(){
+  if(!currentAuditAsset){toast('No asset loaded','err');return;}
+  const sheet=document.createElement('div');
+  sheet.id='aud-photo-sheet';
+  sheet.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:flex-end;justify-content:center;';
+  sheet.innerHTML=`
+    <div style="background:var(--surf);border-radius:18px 18px 0 0;width:100%;max-width:480px;padding:20px;padding-bottom:34px;">
+      <div style="font-size:12px;color:var(--text3);text-align:center;margin-bottom:16px;text-transform:uppercase;letter-spacing:.8px;font-family:var(--fh);">🔄 Replace Audit Photo</div>
+      <button onclick="document.getElementById('aud-pf-cam').click();this.closest('#aud-photo-sheet').remove()"
+        style="width:100%;background:var(--g-blue);border:none;border-radius:12px;padding:14px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:10px;">
+        📷 Take New Photo
+      </button>
+      <button onclick="document.getElementById('aud-pf-gal').click();this.closest('#aud-photo-sheet').remove()"
+        style="width:100%;background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:14px;font-size:14px;font-weight:600;color:var(--text);cursor:pointer;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:10px;">
+        🖼 Choose from Gallery
+      </button>
+      <button onclick="this.closest('#aud-photo-sheet').remove()"
+        style="width:100%;background:none;border:1px solid var(--border);border-radius:12px;padding:12px;font-size:13px;color:var(--text3);cursor:pointer;">
+        Cancel
+      </button>
+    </div>`;
+  document.body.appendChild(sheet);
+  sheet.addEventListener('click',e=>{if(e.target===sheet)sheet.remove();});
+}
+
+async function handleAuditPhoto(e, src){
+  const f=e.target.files[0];if(!f)return;
+  e.target.value='';
+  if(!currentAuditAsset){toast('No asset loaded','err');return;}
+  showSaving('Uploading photo…');
+  compressImage(f,800,0.7,async({blob,dataUrl})=>{
+    let photoUrl=dataUrl; // fallback: store as dataUrl
+    if(CONFIGURED&&navigator.onLine){
+      try{
+        const path=`assets/${currentAuditAsset.company_id||'co'}/${currentAuditAsset.barcode}_aud_${Date.now()}.jpg`;
+        const uploaded=await sb.uploadPhoto('asset-photos',path,blob);
+        if(uploaded)photoUrl=uploaded;
+      }catch(uploadErr){
+        logFieldErr('auditPhoto','Upload failed: '+uploadErr.message,'barcode='+currentAuditAsset.barcode);
+      }
+    }
+    // Update photos array — replace index 0 (primary)
+    const photos=Array.isArray(currentAuditAsset.photos)?[...currentAuditAsset.photos]:[];
+    photos[0]=photoUrl;
+    const updates={photos,updated_at:new Date().toISOString()};
+    if(CONFIGURED){
+      try{
+        await sb.update('assets',currentAuditAsset.id,updates);
+        // Write audit trail entry
+        await sb.insert('audit_log',{
+          asset_id:currentAuditAsset.id,
+          company_id:currentAuditAsset.company_id||null,
+          barcode:currentAuditAsset.barcode||'',
+          action:'PHOTO_RETAKE',
+          changes:'Primary photo replaced during audit',
+          audited_by:currentUser?currentUser.username:'field',
+          audited_at:new Date().toISOString()
+        });
+      }catch(e){logFieldErr('auditPhoto','DB update failed: '+e.message,'id='+currentAuditAsset.id);}
+    }
+    // Update in-memory asset and refresh image display
+    currentAuditAsset.photos=photos;
+    const imgWrap=document.getElementById('ar-img-wrap');
+    if(imgWrap){
+      imgWrap.innerHTML=`<div class="ar-img-zone">
+        <img class="ar-img" src="${photoUrl}">
+        <button class="ar-retake-bar" onclick="openAuditPhotoSheet()">🔄 Retake / Replace Photo</button>
+      </div>`;
+    }
+    hideSaving();
+    toast('✅ Photo updated','ok');
+  });
+}
+
+
+
+function registerFromAudit(bc){
+  dismissAudit();
+  go('register');
+  setTimeout(()=>{
+    document.getElementById('bc-inp').value=bc;
+    document.getElementById('bcrow').classList.add('ok');
+    const wrap=document.getElementById('audit-reg-banner-wrap');
+    wrap.innerHTML=`<div id="audit-reg-banner" style="background:rgba(240,192,48,.1);border:1px solid rgba(240,192,48,.3);border-radius:12px;padding:12px 14px;margin-bottom:14px;"><span style="color:var(--acc2);font-size:11px;font-weight:700;">⚑ REGISTERING FROM AUDIT</span><div style="font-size:11px;color:var(--text2);margin-top:3px;">Barcode <span style="color:var(--acc2);font-family:monospace;">${bc}</span> not in database. Complete registration below.</div></div>`;
+    toast('Barcode pre-filled — complete form','info');
+  },120);
+}
+
+function logUnknown(bc){
+  if(!sessionFlags.includes('UNK:'+bc))sessionFlags.push('UNK:'+bc);
+  toast('⚑ Unknown barcode logged: '+bc,'info');
+  dismissAudit();renderAudit();
+}
+
+function dismissAudit(){document.getElementById('aud-result').classList.remove('show');currentAuditAsset=null;}
+function resetAudit(){sessionAudit=[];sessionFlags=[];renderAudit();toast('Audit cycle reset','info');}
+
+function renderAudit(){
+  const tot=CONFIGURED?0:getLocalAssets().length;
+  const done=sessionAudit.length;
+  const flags=sessionFlags.filter(x=>!x.startsWith('UNK:')).length;
+  const unknowns=sessionFlags.filter(x=>x.startsWith('UNK:'));
+  const pct=tot?Math.round(done/tot*100):0;
+  document.getElementById('aud-pct').textContent=pct+'%';
+  document.getElementById('aud-bar').style.width=pct+'%';
+  document.getElementById('av').textContent=done;
+  document.getElementById('ap').textContent=Math.max(0,tot-done-flags);
+  document.getElementById('am').textContent=flags+unknowns.length;
+  const el=document.getElementById('aud-list');
+  let html='';
+  if(done){
+    html+=`<div style="padding:8px 0 5px;font-size:10px;color:var(--text2);letter-spacing:.8px;text-transform:uppercase;">✓ Verified (${done})</div>`;
+    html+=sessionAudit.map(id=>{
+      const a=sessionAssets.find(x=>x.id===id)||getLocalAssets().find(x=>x.id===id)||{name:'Asset '+id,barcode:id,photos:[]};
+      const th=a.photos&&a.photos[0]?`<img class="aud-th" src="${a.photos[0]}">`:`<div class="aud-th-ph">${CAT_EMOJI[a.category]||'📦'}</div>`;
+      return `<div class="aud-item">${th}<div class="aud-inf"><div class="aud-nm">${a.name}</div><div class="aud-bc">▦ ${a.barcode}</div></div><div class="aud-chk done">✓</div></div>`;
+    }).join('');
+  }
+  if(unknowns.length){
+    html+=`<div style="padding:10px 0 5px;font-size:10px;color:var(--acc3);letter-spacing:.8px;text-transform:uppercase;">⚑ Unknown Barcodes (${unknowns.length})</div>`;
+    html+=unknowns.map(e=>{const bc=e.replace('UNK:','');return `<div class="aud-item" style="border-color:rgba(255,72,88,.2);"><div class="aud-th-ph" style="background:rgba(255,72,88,.08);">❓</div><div class="aud-inf"><div class="aud-nm" style="color:var(--acc3);">Unknown</div><div class="aud-bc">▦ ${bc}</div></div><button onclick="registerFromAudit('${bc}')" style="background:var(--acc2);color:#0a1e38;border:none;border-radius:7px;padding:5px 9px;font-size:9px;font-weight:700;cursor:pointer;">Register</button></div>`;}).join('');
+  }
+  if(!html)html=`<div style="text-align:center;padding:20px;font-size:11px;color:var(--text3);">Scan assets above to begin verification.</div>`;
+  el.innerHTML=html;
+}
+
+// ══════════════════════════════════════════════════════
+// SPOOL — field user's personal export of what they captured
+// ══════════════════════════════════════════════════════
+function renderSpool(){
+  document.getElementById('sp-reg').textContent=sessionAssets.length;
+  document.getElementById('sp-aud').textContent=sessionAudit.length;
+  const el=document.getElementById('spool-list');
+  if(!sessionAssets.length){
+    el.innerHTML='<div class="empty"><div class="empty-i">📤</div><div class="empty-t">No Captures Yet</div><div class="empty-s">Assets you register this session will appear here.</div></div>';
+    return;
+  }
+  const canEdit=PERMS.edit_own_assets;
+  const canDelete=PERMS.delete_own_assets;
+
+  el.innerHTML='<div style="padding:8px 0 6px;font-size:10px;color:var(--text2);letter-spacing:.8px;text-transform:uppercase;">Session Captures</div>'
+  +sessionAssets.map(function(a){
+    const th=a.photos&&a.photos[0]
+      ?'<img class="aud-th" src="'+a.photos[0]+'">'
+      :'<div class="aud-th-ph">'+(CAT_EMOJI[a.category]||'📦')+'</div>';
+    const editBtn=canEdit
+      ?'<button onclick="spoolEditAsset(\''+a.id+'\')" style="background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 9px;font-size:9px;cursor:pointer;font-family:Arial,Helvetica,sans-serif;margin-left:5px;">Edit</button>'
+      :'';
+    const delBtn=canDelete
+      ?'<button onclick="spoolDeleteAsset(\''+a.id+'\')" style="background:rgba(255,72,88,.1);color:var(--acc3);border:1px solid rgba(255,72,88,.2);border-radius:7px;padding:4px 9px;font-size:9px;cursor:pointer;font-family:Arial,Helvetica,sans-serif;margin-left:4px;">Delete</button>'
+      :'';
+    const synced=a._synced
+      ?'<span style="font-size:9px;color:var(--acc);margin-left:6px;">☁ Synced</span>'
+      :'<span style="font-size:9px;color:var(--text3);margin-left:6px;">⏳ Pending sync</span>';
+    const apvS=a.approval_status||'pending';
+    const apvPill='<span class="apv-pill apv-'+apvS+'" style="margin-left:5px;">'
+      +(apvS==='approved'?'&#x2705; Approved':apvS==='rejected'?'&#x274C; Rejected':'&#x1F550; Pending')+'</span>';
+    const commentLine=(apvS==='rejected'||apvS==='approved')&&a.approval_comment
+      ?'<div style="font-size:9px;color:'+(apvS==='rejected'?'var(--acc3)':'var(--acc4)')
+        +';margin-top:2px;font-style:italic;">&#x1F4AC; '+a.approval_comment+'</div>'
+      :'';
+    const gpsLine=a.capture_location
+      ?'<div style="font-size:9px;color:var(--text3);margin-top:1px;">&#x1F4CD; '+a.capture_location+'</div>'
+      :'';
+    return '<div class="aud-item" id="spool-item-'+a.id+'">'+th
+      +'<div class="aud-inf">'
+      +'<div class="aud-nm">'+a.name+synced+apvPill+'</div>'
+      +'<div class="aud-bc">▦ '+a.barcode+' · '+(a.location||'—')+'</div>'
+      +'<div style="font-size:9px;color:var(--text3);margin-top:1px;">'+(a.department||'—')+' · '+a.condition+'</div>'
+      +commentLine
+      +gpsLine
+      +'</div>'
+      +'<div style="display:flex;align-items:center;">'
+      +'<span class="badge '+(getStatCls(a.status))+'" style="font-size:9px;padding:3px 7px;border-radius:5px;">'+a.status+'</span>'
+      +editBtn+delBtn
+      +'</div></div>';
+  }).join('');
+}
+
+function spoolCSV(){
+  if(!sessionAssets.length){toast('No captures in this session','err');return;}
+  const h=[
+    'Barcode','Asset Name','Category','Sub-Category','Location','Department',
+    'Status','Condition','Custodian','Serial','Notes',
+    'Approval Status','Approval Comment','Approved By','Approved At',
+    'GPS Latitude','GPS Longitude','GPS Location',
+    'Registered By','Date Captured','Cloud Synced'
+  ];
+  const rows=sessionAssets.map(a=>[
+    a.barcode, a.name, a.category||'', a.sub_category||'',
+    a.location||'', a.department||'', a.status||'', a.condition||'',
+    a.custodian||'', a.serial||'', a.notes||'',
+    a.approval_status||'pending', a.approval_comment||'',
+    a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
+    a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
+    a.registered_by||'',
+    a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
+    a._synced?'Yes':'No'
+  ].map(v=>'\"'+String(v||'').replace(/"/g,'""')+'\"').join(','));
+  const filename='Spool_'+currentUser.username+'_'+new Date().toISOString().split('T')[0]+'.csv';
+  triggerDownload([h.join(','),...rows].join('\n'), filename);
+  toast('Spool exported \u2713','ok');
+}
+
+
+function spoolShare(){
+  const text=`AssetTrackPro Spool — ${currentUser.name||currentUser.username}\n${new Date().toLocaleDateString('en-GB')}\nRegistered: ${sessionAssets.length} assets\nAudited: ${sessionAudit.length}\n\n`+
+  sessionAssets.map(a=>`▦ ${a.barcode} — ${a.name} (${a.location})`).join('\n');
+  if(navigator.share){navigator.share({title:'My Asset Spool',text});}
+  else{navigator.clipboard&&navigator.clipboard.writeText(text);toast('Spool copied to clipboard','ok');}
+}
+
+function spoolPhotoReport(){
+  if(!sessionAssets.length){toast('No captures yet','err');return;}
+  const user=currentUser.name||currentUser.username;
+  const dateStr=new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'long',year:'numeric'});
+  const cards=sessionAssets.map(function(a){
+    const photos=a.photos||[];
+    const pHtml=photos.length
+      ?photos.map(function(p){return '<img src="'+p+'" style="width:100px;height:80px;object-fit:cover;border-radius:7px;border:1px solid #e0e6f0;">';}).join('')
+      :'<div style="width:100px;height:80px;background:#f0f2f8;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#bbb;">&#128230;</div>';
+    return '<div style="background:#fff;border-radius:12px;padding:14px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);border:1px solid #e8edf5;">'
+      +'<div style="font-size:15px;font-weight:700;color:#1a2238;">'+a.name+'</div>'
+      +'<div style="font-size:10px;color:#00c8a0;font-family:monospace;margin-top:2px;">&#9638; '+a.barcode+'</div>'
+      +'<div style="display:flex;gap:7px;margin:10px 0;overflow-x:auto;">'+pHtml+'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;">'
+      +'<div><span style="color:#999;">Location</span><br><b>'+(a.location||'—')+'</b></div>'
+      +'<div><span style="color:#999;">Department</span><br><b>'+(a.department||'—')+'</b></div>'
+      +'<div><span style="color:#999;">Condition</span><br><b>'+(a.condition||'—')+'</b></div>'
+      +'<div><span style="color:#999;">Status</span><br><b>'+a.status+'</b></div>'
+      +'<div><span style="color:#999;">Custodian</span><br><b>'+(a.custodian||'—')+'</b></div>'
+      +'<div><span style="color:#999;">Value</span><br><b>'+(a.value?'&#8358;'+parseInt(a.value).toLocaleString():'—')+'</b></div>'
+      +'</div></div>';
+  }).join('');
+  const html='<!DOCTYPE html>'
+    +'<html><head><meta charset="UTF-8">'
+    +'<title>Spool - '+user+'</title>'
+    +'</head>'
+    +'<body style="font-family:sans-serif;background:#f4f6fa;padding:20px;max-width:700px;margin:0 auto;">'
+    +'<div style="background:#0a1e38;color:#fff;padding:20px;border-radius:12px;margin-bottom:20px;">'
+    +'<div style="font-size:22px;font-weight:800;">AssetTrackPro Field Spool</div>'
+    +'<div style="font-size:12px;color:rgba(255,255,255,.5);margin-top:4px;">'+user+' &middot; '+dateStr+'</div>'
+    +'<div style="font-size:12px;color:#00c8a0;margin-top:8px;">'+sessionAssets.length+' assets registered &middot; '+sessionAudit.length+' audited</div>'
+    +'</div>'+cards
+    +'<'+'/body><'+'/html>';
+  const blob=new Blob([html],{type:'text/html'});
+  const url=URL.createObjectURL(blob);
+  const w=window.open(url,'_blank');
+  if(!w){
+    const l=document.createElement('a');
+    l.href=url;
+    l.download='Spool_'+currentUser.username+'.html';
+    l.click();
+  }
+  toast('Photo report opened','ok');
+}
+
+function spoolPrint(){window.print();}
+
+// ══════════════════════════════════════════════════════
+// SCANNER
+// ══════════════════════════════════════════════════════
+let scanMode='reg',scanStream=null,scanActive=false,zxingReader=null,torchOn=false,torchSupported=false;
+
+function openScanner(mode){
+  scanMode=mode;
+  const titles={reg:'Scan Asset Barcode',audit:'Scan Asset to Audit'};
+  document.getElementById('so-ttl').textContent=titles[mode]||'Scan Barcode';
+  document.getElementById('so-inp').value='';
+  document.getElementById('scan-ov').classList.add('open');
+  const loader=document.getElementById('scan-loader');
+  loader.classList.remove('hidden');
+  setLoaderTxt('STARTING CAMERA…');
+  startCam();
+}
+
+function setLoaderTxt(t){const el=document.getElementById('scan-loader-txt');if(el)el.textContent=t;}
+function setScanStatus(t,c='rgba(255,255,255,.8)'){const el=document.getElementById('so-status');if(el){el.textContent=t;el.style.color=c;}}
+
+async function startCam(){
+  stopCam();
+  torchOn=false;torchSupported=false;
+  const torchBtn=document.getElementById('torch-btn');
+  if(torchBtn){torchBtn.style.display='none';torchBtn.classList.remove('on');}
+  if(!window.isSecureContext){showCamErr('insecure');return;}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showCamErr('unavailable');return;}
+  try{
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+    const vid=document.getElementById('scanvid');
+    vid.srcObject=scanStream;
+    await vid.play();
+    document.getElementById('scan-loader').classList.add('hidden');
+    setScanStatus('ALIGN BARCODE WITHIN FRAME','rgba(0,200,160,.9)');
+    // Check torch support on the video track
+    const track=scanStream.getVideoTracks()[0];
+    if(track){
+      const caps=track.getCapabilities?track.getCapabilities():{};
+      torchSupported=!!(caps.torch);
+      if(torchSupported&&torchBtn)torchBtn.style.display='flex';
+    }
+    startDecode(vid);
+  }catch(err){
+    if(err.name==='NotAllowedError')showCamErr('denied');
+    else if(err.name==='NotFoundError')showCamErr('notfound');
+    else if(err.name==='NotReadableError')showCamErr('inuse');
+    else showCamErr('other');
+  }
+}
+
+function startDecode(vid){
+  scanActive=true;
+  if('BarcodeDetector' in window){
+    const det=new BarcodeDetector({formats:['code_128','code_39','ean_13','ean_8','upc_a','qr_code','data_matrix']});
+    const canvas=document.getElementById('scancanvas');
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    const tick=async()=>{
+      if(!scanActive)return;
+      if(vid.readyState>=2&&vid.videoWidth>0){
+        canvas.width=vid.videoWidth;canvas.height=vid.videoHeight;
+        ctx.drawImage(vid,0,0);
+        try{const codes=await det.detect(canvas);if(codes.length){onScanResult(codes[0].rawValue);return;}}catch(e){}
+      }
+      if(scanActive)requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return;
+  }
+  // ZXing fallback
+  const s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.20.0/zxing.min.js';
+  s.onload=()=>{
+    if(!scanActive)return;
+    setScanStatus('ALIGN BARCODE WITHIN FRAME','rgba(0,200,160,.9)');
+    try{
+      zxingReader=new ZXing.BrowserMultiFormatReader();
+      zxingReader.decodeFromVideoElement(vid,(res)=>{if(res)onScanResult(res.getText());});
+    }catch(e){setScanStatus('Use manual entry below','rgba(255,72,88,.8)');}
+  };
+  document.head.appendChild(s);
+}
+
+function onScanResult(code){
+  if(!code||!scanActive)return;
+  scanActive=false;
+  const box=document.querySelector('.so-box');
+  if(box){box.style.boxShadow='0 0 0 3px #00c8a0';setTimeout(()=>box.style.boxShadow='none',350);}
+  setScanStatus('✓ DETECTED: '+code,'rgba(0,200,160,1)');
+  setTimeout(()=>{
+    closeScanner();
+    if(scanMode==='reg')applyBarcode(code);
+    else if(scanMode==='audit')processAuditScan(code);
+  },350);
+}
+
+function applyBarcode(bc){
+  document.getElementById('bc-inp').value=bc;
+  document.getElementById('bcrow').classList.add('ok');
+  toast('Barcode captured: '+bc,'ok');
+}
+
+async function toggleTorch(){
+  if(!torchSupported||!scanStream){toast('Torch not available on this device','warn');return;}
+  torchOn=!torchOn;
+  try{
+    const track=scanStream.getVideoTracks()[0];
+    await track.applyConstraints({advanced:[{torch:torchOn}]});
+    const btn=document.getElementById('torch-btn');
+    if(btn){
+      btn.classList.toggle('on',torchOn);
+      btn.title=torchOn?'Torch ON — tap to turn off':'Toggle flashlight';
+    }
+  }catch(e){
+    torchOn=!torchOn; // revert
+    toast('Could not toggle torch: '+e.message,'err');
+  }
+}
+
+function stopCam(){
+  scanActive=false;
+  if(zxingReader){try{zxingReader.reset();}catch(e){}zxingReader=null;}
+  // Always kill torch before stopping tracks
+  if(torchOn&&scanStream){
+    try{const t=scanStream.getVideoTracks()[0];t.applyConstraints({advanced:[{torch:false}]});}catch(e){}
+    torchOn=false;
+  }
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+  const v=document.getElementById('scanvid');if(v)v.srcObject=null;
+}
+
+function closeScanner(){
+  stopCam();
+  document.getElementById('scan-ov').classList.remove('open');
+  const card=document.querySelector('.cam-err-card');if(card)card.remove();
+  const loader=document.getElementById('scan-loader');if(loader)loader.classList.remove('hidden');
+  setLoaderTxt('STARTING CAMERA…');
+  setScanStatus('ALIGN BARCODE WITHIN FRAME');
+}
+
+function manualScan(){const v=document.getElementById('so-inp').value.trim();if(!v){toast('Enter barcode','err');return;}onScanResult(v);}
+
+function showCamErr(type){
+  document.getElementById('scan-loader').classList.add('hidden');
+  const msgs={denied:'Camera permission denied.\n\n1. Open Chrome Settings → Site Settings → Camera\n2. Allow this site\n3. Tap Retry',insecure:'Camera requires HTTPS.\n\nOpen the file from your Files app, or use the GitHub Pages URL.',unavailable:'Camera API not available.\n\nUse Chrome or Safari. Do not open from WhatsApp.',inuse:'Camera is in use by another app.\n\nClose it and tap Retry.',notfound:'No camera detected.',other:'Camera error. Use manual entry below.'};
+  const wrap=document.querySelector('.so-vidwrap');if(!wrap)return;
+  const old=wrap.querySelector('.cam-err-card');if(old)old.remove();
+  const card=document.createElement('div');card.className='cam-err-card';
+  card.innerHTML=`<div class="cam-err-ico">📷</div><div class="cam-err-ttl">Camera Issue</div><div class="cam-err-steps" style="white-space:pre-line;">${msgs[type]||msgs.other}</div><button class="cam-err-retry" onclick="retryCam()">↺ Retry</button>`;
+  wrap.appendChild(card);
+}
+function retryCam(){const c=document.querySelector('.cam-err-card');if(c)c.remove();const l=document.getElementById('scan-loader');if(l)l.classList.remove('hidden');setLoaderTxt('RETRYING…');startCam();}
+
+// ══════════════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════════════
+function refreshDash(){
+  document.getElementById('k-cap').textContent=sessionAssets.length;
+  document.getElementById('k-aud').textContent=sessionAudit.length;
+  document.getElementById('k-flag').textContent=sessionFlags.length;
+}
+
+// ══════════════════════════════════════════════════════
+// TOAST / SAVING
+// ══════════════════════════════════════════════════════
+let toastT;
+function toast(msg,type=''){const el=document.getElementById('toast-el');if(!el)return;el.textContent=msg;el.className='toast '+type+' show';clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),2800);}
+function showSaving(msg){const el=document.getElementById('saving-overlay');const tx=document.getElementById('saving-txt');if(tx)tx.textContent=msg||'Saving…';if(el)el.classList.add('show');}
+function hideSaving(){const el=document.getElementById('saving-overlay');if(el)el.classList.remove('show');}
+
+// badge styles (inline for spool) — dynamic to support custom status values
+const _BADGE_COLORS=['rgba(0,200,160,.12);color:#00c8a0','rgba(240,192,48,.12);color:#f0c030','rgba(255,72,88,.12);color:#ff4858','rgba(74,128,255,.12);color:#4a80ff','rgba(110,62,196,.12);color:#a78bfa'];
+function getBadgeStyle(status){
+  const idx=STATUS_OPTIONS.indexOf(status);
+  return 'background:'+_BADGE_COLORS[idx>=0?idx%_BADGE_COLORS.length:0];
+}
+
+// ── CUSTOM FIELDS ──────────────────────────────────────────────────────
+let customFields=[];
+
+function loadCustomFieldsForCompany(companyId){
+  if(CONFIGURED){
+    sb.query('config',`?company_id=eq.${companyId}&key=eq.custom_fields&select=value`)
+      .then(rows=>{
+        if(rows&&rows.length){
+          try{
+            const parsed=JSON.parse(rows[0].value||'[]');
+            // Handle double-encoded legacy data
+            customFields=typeof parsed==='string'?JSON.parse(parsed):parsed;
+          }catch(e){customFields=[];}
+        } else {customFields=[];}
+        renderCustomFieldInputs();
+      }).catch(()=>{customFields=[];renderCustomFieldInputs();});
+  } else {
+    try{customFields=JSON.parse(localStorage.getItem(`atp_cf_${companyId||'_'}`)||'[]');}
+    catch(e){customFields=[];}
+    renderCustomFieldInputs();
+  }
+}
+
+function renderCustomFieldInputs(){
+  const wrap=document.getElementById('cf-inputs-wrap');
+  if(!wrap||!customFields.length){if(wrap)wrap.innerHTML='';return;}
+  wrap.innerHTML=customFields.map(f=>{
+    const req=f.required?'<span style="color:var(--acc2);font-size:10px;margin-left:4px;">REQUIRED</span>':'';
+    let input='';
+    if(f.type==='dropdown'){
+      const opts=(f.options||'').split(',').map(o=>`<option value="${o.trim()}">${o.trim()}</option>`).join('');
+      input=`<select class="fi" id="cf_${f.key}"><option value="">Select…</option>${opts}</select>`;
+    } else if(f.type==='checkbox'){
+      input=`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;"><input type="checkbox" id="cf_${f.key}" style="width:18px;height:18px;"><label for="cf_${f.key}" style="font-size:13px;color:var(--text2);">${f.label}</label></div>`;
+    } else if(f.type==='textarea'){
+      input=`<textarea class="fi" id="cf_${f.key}" rows="3" placeholder="${f.placeholder||''}" style="height:auto;resize:none;"></textarea>`;
+    } else if(f.type==='number'){
+      input=`<input class="fi" type="number" id="cf_${f.key}" placeholder="${f.placeholder||''}">`;
+    } else if(f.type==='date'){
+      input=`<input class="fi" type="date" id="cf_${f.key}">`;
+    } else if(f.type==='barcode'){
+      input=`<div style="display:flex;gap:8px;"><input class="fi" type="text" id="cf_${f.key}" placeholder="${f.placeholder||'Scan or type barcode'}" style="flex:1;"><button type="button" onclick="triggerCFScan('cf_${f.key}')" style="background:var(--acc);color:#000;border:none;border-radius:var(--r-sm);padding:10px 14px;font-size:13px;cursor:pointer;">📷</button></div>`;
+    } else {
+      input=`<input class="fi" type="text" id="cf_${f.key}" placeholder="${f.placeholder||''}">`;
+    }
+    if(f.type==='checkbox')return`<div class="fg">${input}</div>`;
+    return`<div class="fg"><label class="fl">${f.label}${req}</label>${input}</div>`;
+  }).join('');
+}
+
+function collectCustomFieldValues(){
+  const vals={};
+  customFields.forEach(f=>{
+    const el=document.getElementById('cf_'+f.key);
+    if(!el)return;
+    if(f.type==='checkbox') vals[f.key]=el.checked;
+    else vals[f.key]=el.value;
+  });
+  return vals;
+}
+
+function validateCustomFields(){
+  for(const f of customFields){
+    if(!f.required)continue;
+    const el=document.getElementById('cf_'+f.key);
+    if(!el)continue;
+    if(f.type==='checkbox')continue; // checkboxes can be false
+    if(!el.value.trim()){toast(`"${f.label}" is required`,'err');return false;}
+  }
+  return true;
+}
+
+function triggerCFScan(inputId){
+  // Simple alert placeholder - barcode scan for custom fields
+  toast('Point scanner at barcode — or type manually','info');
+}
+
+// ── THEME ────────────────────────────────────────────────────────────
+(function(){
+  const saved=localStorage.getItem('atp_theme')||'dark';
+  if(saved==='light'){document.documentElement.setAttribute('data-theme','light');}
+  const btn=document.getElementById('theme-btn');
+  if(btn)btn.textContent=saved==='light'?'🌙':'☀️';
+})();
+function toggleTheme(){
+  const isDark=document.documentElement.getAttribute('data-theme')==='dark';
+  const next=isDark?'light':'dark';
+  if(next==='dark'){document.documentElement.setAttribute('data-theme','dark');}
+  else{document.documentElement.removeAttribute('data-theme');}
+  localStorage.setItem('atp_theme',next);
+  const btn=document.getElementById('theme-btn');
+  if(btn)btn.textContent=next==='dark'?'☀️':'🌙';
+}
+</script>
+
+  <!-- ── Field Error Log Modal ── -->
+  <div id="field-err-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:flex-end;justify-content:center;">
+    <div style="background:var(--surf);border-radius:18px 18px 0 0;width:100%;max-width:480px;max-height:80vh;display:flex;flex-direction:column;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;">
+        <div style="font-size:14px;font-weight:700;color:var(--acc3);">⚠ Error Log</div>
+        <button onclick="hideFieldErrLog()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
+      </div>
+      <div id="field-err-body" style="overflow-y:auto;padding:12px 20px;flex:1;"></div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border);flex-shrink:0;">
+        <button onclick="clearFieldErrLog()" style="width:100%;background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px;font-size:12px;color:var(--text3);cursor:pointer;">Clear Log</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Capture History Screen ── -->
+  <div class="screen" id="s-history">
+    <div class="shdr">
+      <button class="back-btn" onclick="go('home')">←</button>
+      <div class="shdr-ttl">My Capture History</div>
+    </div>
+    <div style="padding:16px 20px 100px;" id="history-list">
+      <div class="empty"><div class="empty-i">📋</div><div class="empty-t">Loading…</div></div>
+    </div>
+  </div>
+
+<!-- Force Change Password Modal -->
+<div class="fcp-overlay" id="fcp-overlay">
+  <div class="fcp-box">
+    <div class="fcp-ttl">🔐 Set New Password</div>
+    <div class="fcp-sub">This is your first login. You must set a new password before continuing.</div>
+    <div class="fg" style="margin-bottom:12px;">
+      <label class="fl" style="font-size:11px;color:var(--text2);letter-spacing:.7px;text-transform:uppercase;margin-bottom:7px;display:block;font-weight:800;">New Password</label>
+      <input class="fi" type="password" id="fcp-new" placeholder="Enter new password" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:13px;font-weight:700;outline:none;">
+    </div>
+    <div class="fg" style="margin-bottom:12px;">
+      <label class="fl" style="font-size:11px;color:var(--text2);letter-spacing:.7px;text-transform:uppercase;margin-bottom:7px;display:block;font-weight:800;">Confirm Password</label>
+      <input class="fi" type="password" id="fcp-confirm" placeholder="Repeat new password" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:13px;font-weight:700;outline:none;">
+    </div>
+    <div class="fcp-err" id="fcp-err"></div>
+    <button onclick="commitFirstLoginPassword()" style="width:100%;padding:14px;border-radius:12px;background:linear-gradient(135deg,#0077cc,#005fa3);color:#fff;font-family:var(--fh);font-size:15px;font-weight:900;border:none;cursor:pointer;">Set Password & Continue →</button>
+  </div>
+</div>
+
+</body>
+</html>
