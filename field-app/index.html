@@ -509,6 +509,8 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
         <div class="kpi c3"><div class="ki">⚠️</div><div class="kl">Flagged</div><div class="kv" id="k-flag">0</div><div class="ks">issues</div></div>
         <div class="kpi c4"><div class="ki">☁️</div><div class="kl">Sync</div><div class="kv" id="k-sync" style="font-size:14px;">—</div><div class="ks">cloud status</div></div>
       </div>
+      <!-- Asset cap warning banner — shown when ≥80% of tier limit is reached -->
+      <div id="cap-warning-banner" style="display:none;"></div>
       <div class="sec"><div class="sec-t">Quick Actions</div></div>
       <div class="qagrid">
         <button class="qa prime" onclick="go('register')"><div class="qa-i">📷</div><div class="qa-l">Scan & Register Asset</div></button>
@@ -844,6 +846,11 @@ const sb = {
 // In production use Supabase Auth (supabase.com/docs/guides/auth)
 // ══════════════════════════════════════════════════════
 let currentUser=null;
+let currentCompanyTier=0;       // 0=BASIC 1=PRO 2=ENTERPRISE — loaded at login
+let currentCompanyAssetCount=0; // Live count fetched at login, incremented on each save
+
+const FIELD_TIER_LABELS = {0:'BASIC', 1:'PRO', 2:'ENTERPRISE'};
+const FIELD_TIER_CAP    = {0:5000,   1:20000, 2:Infinity};
 let sessionAssets=[];  // assets registered THIS session
 let sessionAudit=[];   // assets audited THIS session
 let sessionFlags=[];
@@ -1000,7 +1007,7 @@ function showLockout(companyName, reason){
 async function checkTenantAccessAtLogin(user){
   if(!CONFIGURED||!user.company_id) return true;  // demo / no company — allow
   try{
-    const coRes=await sb.query('companies',`?id=eq.${encodeURIComponent(user.company_id)}&select=id,name,active,access_type,access_expiry`);
+    const coRes=await sb.query('companies',`?id=eq.${encodeURIComponent(user.company_id)}&select=id,name,active,access_type,access_expiry,tier`);
     if(!Array.isArray(coRes)||!coRes.length) return true;
     const co=coRes[0];
     const now=new Date();
@@ -1013,8 +1020,16 @@ async function checkTenantAccessAtLogin(user){
       showLockout(co.name,'suspended');
       return false;
     }
+    // Store tier for cap enforcement
+    currentCompanyTier = Number(co.tier)||0;
+    // Fetch current asset count for this company
+    try{
+      const countRes=await sb.query('assets',`?company_id=eq.${encodeURIComponent(user.company_id)}&select=id`);
+      currentCompanyAssetCount = Array.isArray(countRes) ? countRes.length : 0;
+    }catch(e){ currentCompanyAssetCount=0; }
+    // Show warning banner if near cap
+    checkAndShowCapBanner();
   }catch(e){
-    // Network error — fail open, don't block field officers on a connectivity blip
     console.warn('checkTenantAccessAtLogin:',e.message);
   }
   return true;
@@ -1585,6 +1600,53 @@ function compressImage(file,maxWidth,quality,cb){
 // ERROR LOG
 // ══════════════════════════════════════════════════════
 let FIELD_ERRORS=[];
+// ══════════════════════════════════════════════════════
+// TIER CAP ENFORCEMENT
+// ══════════════════════════════════════════════════════
+function checkFieldAssetCap(){
+  const cap = FIELD_TIER_CAP[currentCompanyTier];
+  const count = currentCompanyAssetCount;
+
+  if(cap !== Infinity && count >= cap){
+    showCapBlockScreen();
+    return false;
+  }
+  if(cap !== Infinity && count >= cap * 0.9){
+    checkAndShowCapBanner();
+  }
+  return true;
+}
+
+function checkAndShowCapBanner(){
+  const cap = FIELD_TIER_CAP[currentCompanyTier];
+  if(cap === Infinity) return;
+  const count = currentCompanyAssetCount;
+  const pct = Math.round((count/cap)*100);
+  if(pct < 80) return;
+  const remaining = cap - count;
+  const label = FIELD_TIER_LABELS[currentCompanyTier];
+  const isOver = count >= cap;
+  const banner = document.getElementById('cap-warning-banner');
+  if(!banner) return;
+  banner.style.display = '';
+  banner.style.background = isOver ? 'rgba(214,48,64,.1)' : 'rgba(255,160,0,.1)';
+  banner.style.border = isOver ? '2px solid rgba(214,48,64,.3)' : '2px solid rgba(255,160,0,.3)';
+  banner.style.borderRadius = '10px';
+  banner.style.padding = '10px 14px';
+  banner.style.margin = '10px 0';
+  banner.style.fontSize = '12px';
+  banner.style.color = 'var(--text)';
+  banner.innerHTML = isOver
+    ? `⛔ <strong>${label} plan asset limit reached</strong> (${count.toLocaleString()}/${cap.toLocaleString()}). New captures are blocked. Contact Skyrit Technologies to upgrade.`
+    : `⚠ <strong>${pct}% of ${label} plan used</strong> — ${count.toLocaleString()}/${cap.toLocaleString()} assets · ${remaining.toLocaleString()} remaining. Contact Skyrit Technologies to upgrade before reaching the limit.`;
+}
+
+function showCapBlockScreen(){
+  const cap = FIELD_TIER_CAP[currentCompanyTier];
+  const label = FIELD_TIER_LABELS[currentCompanyTier];
+  toast(`⛔ ${label} asset cap (${cap.toLocaleString()}) reached — contact Skyrit Technologies to upgrade`,'err');
+}
+
 function logFieldErr(src,msg,detail){
   FIELD_ERRORS.unshift({src,msg:msg||'',detail:detail||'',t:new Date().toLocaleTimeString()});
   if(FIELD_ERRORS.length>50)FIELD_ERRORS.pop();
@@ -1897,21 +1959,35 @@ async function syncPendingAssets(){
   const q=getPendingQueue();
   if(!q.length){toast('No pending assets to sync','info');return;}
   if(!navigator.onLine){toast('Still offline — cannot sync','err');return;}
-  
+
   const syncBtn=document.getElementById('sync-btn');
   if(syncBtn){syncBtn.disabled=true;syncBtn.textContent='Syncing…';}
-  
+
   let synced=0, failed=0;
   const remaining=[];
-  
+
+  // GPS columns — stripped as fallback if Supabase schema hasn't been migrated yet
+  const GPS_COLS = ['capture_lat','capture_lng','capture_location'];
+
   for(const asset of q){
     try{
       showSaving('Syncing '+synced+'/'+q.length+'…');
-      const res=await sb.insert('assets',asset);
+      let res = await sb.insert('assets', asset).catch(async e=>{
+        // Schema cache error — column doesn't exist in DB yet
+        // Retry once with GPS fields stripped so other data still syncs
+        const msg = e.message||'';
+        if(msg.includes('schema cache')||msg.includes('column')||msg.includes('capture')){
+          const stripped = Object.fromEntries(
+            Object.entries(asset).filter(([k])=>!GPS_COLS.includes(k))
+          );
+          return await sb.insert('assets', stripped);
+        }
+        throw e;
+      });
       if(Array.isArray(res)){
         synced++;
-        // Update history record to cloud=true
         markHistoryCloud(asset.id);
+        currentCompanyAssetCount++;
       } else {
         failed++;
         remaining.push(asset);
@@ -1923,12 +1999,13 @@ async function syncPendingAssets(){
       logFieldErr('syncPending',e.message,'barcode='+asset.barcode);
     }
   }
-  
+
   localStorage.setItem('atp_sync_queue',JSON.stringify(remaining));
   hideSaving();
   if(syncBtn){syncBtn.disabled=false;syncBtn.textContent='🔄 Sync Now';}
-  
+
   updateSyncBadge();
+  checkAndShowCapBanner();
   if(synced>0) toast(synced+' asset'+(synced>1?'s':'')+' synced to cloud ✓','ok');
   if(failed>0) toast(failed+' failed — tap ⚠ for details','err');
 }
@@ -1944,6 +2021,9 @@ function markHistoryCloud(assetId){
 }
 
 async function saveAsset(){
+  // ── Tier cap check — block before any processing ──────────────────
+  if(!checkFieldAssetCap()) return;
+
   const bc=document.getElementById('bc-inp').value.trim();
   const cat=document.getElementById('f-cat').value;
   const sub=document.getElementById('f-subcat').value;
@@ -2130,6 +2210,7 @@ async function saveAsset(){
       logFieldErr('saveAsset', cloudErr||'Cloud save failed', 'barcode='+asset.barcode);
       toast('Saved locally — will sync when online','warn');
       addToPendingSync(asset);
+      currentCompanyAssetCount++;
       setTimeout(()=>go(fromAudit?'audit':'home'),800);
     }
   }
@@ -2139,6 +2220,7 @@ async function saveAsset(){
       const res=await sb.insert('assets',asset);
       // sb.insert now throws on HTTP error — success = array returned
       if(Array.isArray(res)){
+        currentCompanyAssetCount++;
         finishSave(true);
       } else {
         saveLocally(asset);
