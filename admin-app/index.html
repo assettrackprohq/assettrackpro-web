@@ -3309,12 +3309,39 @@ function checkAssetCap(){
     ? ONPREM_LICENSE_TIER
     : (activeCompany ? (Number(activeCompany.tier) || 0) : 0);
   const cap = TIER_ASSET_CAP[tier];
-  if(allAssets.length >= cap){
-    toast(`⛔ ${TIER_LABELS[tier]} asset cap (${cap.toLocaleString()}) reached. Contact Skyrit Technologies to upgrade.`,'err');
+  const count = allAssets.length;
+
+  // Hard block — cap reached
+  if(count >= cap){
+    if(APP_ENVIRONMENT === 'SAAS'){
+      showUpgradeModal(tier + 1 <= 2 ? tier + 1 : 2);
+    } else {
+      toast(`⛔ ${TIER_LABELS[tier]} asset cap (${cap.toLocaleString()}) reached. Contact Skyrit Technologies to upgrade.`,'err');
+    }
     return false;
   }
+
+  // Soft warning — 90% of cap
+  if(cap !== Infinity && count >= cap * 0.9){
+    showCapWarningBanner(tier, count, cap, cap - count);
+  }
+
   return true;
 }
+
+function showCapWarningBanner(tier, count, cap, remaining){
+  const el = document.getElementById('asset-cap-warn');
+  if(!el) return;
+  const pct = Math.round((count/cap)*100);
+  const nextTier = tier + 1 <= 2 ? tier + 1 : null;
+  const upgradeBtn = nextTier && APP_ENVIRONMENT==='SAAS'
+    ? `<button onclick="showUpgradeModal(${nextTier})" style="margin-left:12px;padding:4px 12px;font-size:11px;font-weight:700;background:var(--acc);color:#fff;border:none;border-radius:6px;cursor:pointer;">Upgrade Now</button>`
+    : '';
+  el.innerHTML = `⚠ ${TIER_LABELS[tier]} plan: ${count.toLocaleString()} / ${cap.toLocaleString()} assets used (${pct}%) — ${remaining.toLocaleString()} remaining${upgradeBtn}`;
+  el.style.display = '';
+}
+
+
 
 function getLocalAssets(){
   try{
@@ -5405,6 +5432,7 @@ async function pullFromSheets(){
         if(CONFIGURED)sb.update('assets',existing.id,existing).catch(()=>{});
         updated++;
       } else {
+        if(!checkAssetCap()) return;
         allAssets.push(asset);
         if(CONFIGURED)sb.insert('assets',asset).catch(()=>{});
         added++;
@@ -5842,7 +5870,10 @@ function commitImport(){
         created_at:new Date().toISOString(), updated_at:new Date().toISOString(),
       };
       if(dup&&mode==='replace'){Object.assign(dup,asset);if(CONFIGURED)promises.push(sb.update('assets',dup.id,asset).catch(e=>logErr&&logErr('importAsset',e.message)));}
-      else{allAssets.push(asset);if(CONFIGURED)promises.push(sb.insert('assets',asset).catch(e=>logErr&&logErr('importAsset',e.message)));}
+      else{
+        if(!checkAssetCap()){skipped++;return;}
+        allAssets.push(asset);if(CONFIGURED)promises.push(sb.insert('assets',asset).catch(e=>logErr&&logErr('importAsset',e.message)));
+      }
       added++;
     });
     Promise.all(promises).then(()=>{
