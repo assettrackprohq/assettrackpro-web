@@ -320,6 +320,8 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
 </style>
   <!-- SheetJS for Excel/CSV import & export -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- Paystack Inline JS -->
+  <script src="https://js.paystack.co/v1/inline.js"></script>
 </head>
 <body>
 
@@ -2239,6 +2241,7 @@ function renderCompanies(){
           </div>
           <div style="display:flex;align-items:center;gap:7px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
             <span style="font-size:9px;background:${c.active?'rgba(0,200,160,.1)':'rgba(255,72,88,.1)'};color:${c.active?'var(--acc)':'var(--acc3)'};padding:3px 8px;border-radius:5px;">${c.active?'Active':'Inactive'}</span>
+            <span style="font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.8px;${(c.tier||0)===2?'background:rgba(0,153,107,.12);color:var(--acc4);border:1px solid rgba(0,153,107,.25);':(c.tier||0)===1?'background:rgba(0,119,204,.12);color:var(--acc);border:1px solid rgba(0,119,204,.25);':'background:rgba(110,62,196,.12);color:var(--acc5);border:1px solid rgba(110,62,196,.25);'}">${(c.tier||0)===2?'ENTERPRISE':(c.tier||0)===1?'PRO':'BASIC'}</span>
             <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="switchWorkspace('${c.id}');show('dashboard')">Switch →</button>
             <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="editCompany('${c.id}')">Edit</button>
             <button class="act-btn btn-d" style="padding:5px 10px;font-size:10px;" onclick="deleteCompany('${c.id}','${safeName}')">✕</button>
@@ -2445,6 +2448,13 @@ function editCompany(id){
           <option value="1" ${c.active?'selected':''}>Active</option>
           <option value="0" ${!c.active?'selected':''}>Inactive</option>
         </select></div>
+
+      <div class="fg"><div class="fl">Subscription Tier</div>
+        <select class="fi" id="eco-tier">
+          <option value="0" ${(c.tier||0)==0?'selected':''}>⚪ BASIC — up to 5,000 assets</option>
+          <option value="1" ${(c.tier||0)==1?'selected':''}>🔵 PRO — up to 20,000 assets</option>
+          <option value="2" ${(c.tier||0)==2?'selected':''}>🟢 ENTERPRISE — unlimited</option>
+        </select></div>
     </div>
 
     <div class="modal-acts">
@@ -2464,7 +2474,8 @@ async function saveEditCompany(id){
     address:document.getElementById('eco-address').value.trim()||null,
     currency:document.getElementById('eco-currency').value||'NGN',
     fy_end:document.getElementById('eco-fyend').value||'December',
-    active:document.getElementById('eco-active').value==='1'
+    active:document.getElementById('eco-active').value==='1',
+    tier:Number(document.getElementById('eco-tier').value)||0
   };
   if(!updates.name){toast('Name required','err');return;}
   if(CONFIGURED){
@@ -3329,7 +3340,7 @@ function show(name){
   }
   if(blockedTierPanels.includes(name)){
     const minTier=TIER_PANEL_MAP[name]||0;
-    toast(`⛔ ${TIER_LABELS[minTier]} licence required. Contact Skytec to upgrade.`,'err');return;
+    showUpgradeModal(minTier);return;
   }
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('on'));
@@ -6243,7 +6254,11 @@ function renderSuperOwner(){
         <button class="act-btn ${isActive?'btn-d':'btn-g'}" style="padding:5px 10px;font-size:10px;" onclick="toggleTenantAccess('${c.id}',${!isActive})">${isActive?'Suspend':'Activate'}</button>
         <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="archiveTenant('${c.id}','${c.name.replace(/'/g,"\\'")}')">🗄 Archive</button>
         <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="openTenantSettings('${c.id}')">⚙ Settings</button>
-        <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="switchWorkspace('${c.id}');show('dashboard')">Switch →</button>`;
+        <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="switchWorkspace('${c.id}');show('dashboard')">Switch →</button>
+        ${tier<1?`<button class="act-btn btn-p" style="padding:5px 10px;font-size:10px;background:rgba(0,119,204,.15);color:var(--acc);border:1px solid rgba(0,119,204,.3);" onclick="superOwnerSetTier('${c.id}',1)">↑ PRO</button>`:''}
+        ${tier<2?`<button class="act-btn btn-p" style="padding:5px 10px;font-size:10px;background:rgba(0,153,107,.15);color:var(--acc4);border:1px solid rgba(0,153,107,.3);" onclick="superOwnerSetTier('${c.id}',2)">↑ ENTERPRISE</button>`:''}
+        ${tier>0?`<button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;opacity:.6;" onclick="superOwnerSetTier('${c.id}',${tier-1})">↓ Downgrade</button>`:''}
+      `;
     }
 
     const cardStyle = isArchivedSection
@@ -6617,6 +6632,126 @@ function toggleTheme(){
   const lbl=document.getElementById('theme-label');
   if(icon)icon.textContent=next==='dark'?'☀️':'🌙';
   if(lbl)lbl.textContent=next==='dark'?'Light Mode':'Dark Mode';
+}
+
+// ══════════════════════════════════════════════════════
+// PAYSTACK + TIER UPGRADE SYSTEM
+// ══════════════════════════════════════════════════════
+// Replace with your live Paystack public key before go-live
+const PAYSTACK_PUBLIC_KEY = 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+
+// Pricing in Kobo (NGN × 100)
+const TIER_PRICES = {
+  1: { label:'PRO',        monthly: 5000000,  display:'₦50,000/mo'  }, // ₦50,000
+  2: { label:'ENTERPRISE', monthly: 10000000, display:'₦100,000/mo' }, // ₦100,000
+};
+
+const TIER_FEATURES = {
+  1: ['Up to 20,000 assets','Audit Management','Excel Import','ERP Sync','Custom Fields','Multi-Company'],
+  2: ['Unlimited assets','Approval Workflows','API Access','Offline Field Sync','Everything in PRO'],
+};
+
+function showUpgradeModal(minTier){
+  const currentTier = activeCompany ? (Number(activeCompany.tier)||0) : 0;
+  const price = TIER_PRICES[minTier];
+  if(!price) return;
+  const features = TIER_FEATURES[minTier]||[];
+  const featureList = features.map(f=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text2);">
+    <span style="color:var(--acc4);font-size:14px;">✓</span> ${f}</div>`).join('');
+  const colorMap = {1:'var(--acc)',2:'var(--acc4)'};
+  const color = colorMap[minTier]||'var(--acc)';
+  openModal(`
+    <div style="text-align:center;padding:8px 0 16px;">
+      <div style="font-size:28px;margin-bottom:8px;">${minTier===2?'🚀':'⚡'}</div>
+      <div style="font-family:var(--fh);font-size:20px;font-weight:900;color:${color};">Upgrade to ${price.label}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px;">This feature requires ${price.label} or higher</div>
+    </div>
+    <div style="background:var(--surf2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:.8px;font-weight:700;">What you get</div>
+      ${featureList}
+    </div>
+    <div style="text-align:center;margin-bottom:16px;">
+      <div style="font-family:var(--fh);font-size:28px;font-weight:900;color:var(--text);">${price.display}</div>
+      <div style="font-size:11px;color:var(--text3);">per company workspace · cancel anytime</div>
+    </div>
+    <div class="modal-acts">
+      <button class="act-btn btn-s" onclick="closeModal()">Maybe Later</button>
+      <button class="act-btn btn-p" style="background:${color};flex:1;" onclick="initiateUpgrade(${minTier})">
+        ${minTier===2?'🚀':'⚡'} Upgrade to ${price.label} — ${price.display}
+      </button>
+    </div>
+    <div style="text-align:center;margin-top:10px;font-size:10px;color:var(--text3);">
+      🔒 Secured by Paystack · Instant activation on payment
+    </div>
+  `);
+}
+
+function initiateUpgrade(targetTier){
+  if(!activeCompany){ toast('No active company selected','err'); return; }
+  if(!currentUser){ toast('Not logged in','err'); return; }
+  const price = TIER_PRICES[targetTier];
+  if(!price){ toast('Invalid tier','err'); return; }
+  const email = currentUser.email || '';
+  if(!email){ toast('No email on record for payment','err'); return; }
+
+  closeModal();
+
+  const handler = PaystackPop.setup({
+    key: PAYSTACK_PUBLIC_KEY,
+    email: email,
+    amount: price.monthly,
+    currency: 'NGN',
+    ref: 'ATP-' + activeCompany.id + '-T' + targetTier + '-' + Date.now(),
+    metadata: {
+      company_id: activeCompany.id,
+      company_name: activeCompany.name,
+      target_tier: targetTier,
+      upgraded_by: currentUser.username || email,
+    },
+    callback: async function(response){
+      toast('Payment received — activating '+price.label+'…','ok');
+      await activateTierAfterPayment(activeCompany.id, targetTier, response.reference);
+    },
+    onClose: function(){
+      toast('Payment cancelled','err');
+    }
+  });
+  handler.openIframe();
+}
+
+async function activateTierAfterPayment(companyId, targetTier, paystackRef){
+  try{
+    const updates = { tier: targetTier, paystack_ref: paystackRef, tier_updated_at: new Date().toISOString() };
+    await sb.update('companies', companyId, updates);
+    // Update local state
+    const idx = allCompanies.findIndex(c=>c.id===companyId);
+    if(idx>=0) allCompanies[idx] = {...allCompanies[idx], ...updates};
+    if(activeCompany && activeCompany.id===companyId) activeCompany = {...activeCompany, ...updates};
+    applyTierRestrictions();
+    renderCompanies();
+    populateWorkspaceSelector();
+    toast(`✅ ${TIER_LABELS[targetTier]} activated for ${activeCompany.name}!`,'ok');
+  }catch(e){
+    toast('Payment received but activation failed — contact support. Ref: '+paystackRef,'err');
+    console.error('Tier activation error:',e);
+  }
+}
+
+// Super Owner quick-upgrade — no payment, direct DB update
+async function superOwnerSetTier(companyId, targetTier){
+  const co = allCompanies.find(c=>c.id===companyId);
+  if(!co) return;
+  const label = TIER_LABELS[targetTier]||'BASIC';
+  if(!confirm(`Set ${co.name} to ${label}?`)) return;
+  try{
+    await sb.update('companies', companyId, {tier: targetTier});
+    const idx = allCompanies.findIndex(c=>c.id===companyId);
+    if(idx>=0) allCompanies[idx].tier = targetTier;
+    if(activeCompany && activeCompany.id===companyId){ activeCompany.tier = targetTier; applyTierRestrictions(); }
+    renderCompanies();
+    renderSuperOwner();
+    toast(`✅ ${co.name} upgraded to ${label}`,'ok');
+  }catch(e){ toast('Update failed: '+e.message,'err'); }
 }
 </script>
 </body>
