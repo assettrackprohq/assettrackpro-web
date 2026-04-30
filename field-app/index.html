@@ -460,6 +460,15 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
     <input class="ls-inp" type="text" id="ls-user" placeholder="e.g. field.officer" autocapitalize="none">
   </div>
   <div class="ls-field">
+
+<!-- Project Selector Screen — shown between login and home when user has multiple projects -->
+<div id="project-selector-screen" style="display:none;flex-direction:column;align-items:center;justify-content:flex-start;min-height:100vh;padding:32px 16px;background:var(--bg);">
+  <div class="ls-logo" style="margin-bottom:6px;">AssetTrack<em>Pro</em></div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:28px;letter-spacing:.8px;">SELECT PROJECT</div>
+  <div id="proj-sel-welcome" style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:20px;text-align:center;"></div>
+  <div id="proj-sel-list" style="width:100%;max-width:420px;"></div>
+  <button class="ls-btn" style="margin-top:24px;background:transparent;border:2px solid var(--border);color:var(--text2);max-width:420px;" onclick="doLogout()">← Log Out</button>
+</div>
     <div class="ls-lbl">Password</div>
     <input class="ls-inp" type="password" id="ls-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
   </div>
@@ -511,6 +520,8 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
       </div>
       <!-- Asset cap warning banner — shown when ≥80% of tier limit is reached -->
       <div id="cap-warning-banner" style="display:none;"></div>
+      <!-- Active project badge -->
+      <div id="active-project-badge" style="display:none;font-size:11px;font-weight:700;color:var(--acc);background:rgba(0,119,204,.1);border:1px solid rgba(0,119,204,.25);border-radius:8px;padding:6px 12px;margin-bottom:8px;"></div>
       <div class="sec"><div class="sec-t">Quick Actions</div></div>
       <div class="qagrid">
         <button class="qa prime" onclick="go('register')"><div class="qa-i">📷</div><div class="qa-l">Scan & Register Asset</div></button>
@@ -793,7 +804,8 @@ const sb = {
     'registered_by','last_audit_date','last_audit_by','last_audit_changes',
     'approval_status','approval_comment','approved_by','approved_at',
     'created_at','updated_at',
-    'capture_lat','capture_lng','capture_location'],
+    'capture_lat','capture_lng','capture_location',
+    'project_id'],
   cleanAsset(data){
     const out={};
     this.ASSET_COLS.forEach(k=>{ if(k in data) out[k]=data[k]; });
@@ -846,8 +858,11 @@ const sb = {
 // In production use Supabase Auth (supabase.com/docs/guides/auth)
 // ══════════════════════════════════════════════════════
 let currentUser=null;
-let currentCompanyTier=0;       // 0=BASIC 1=PRO 2=ENTERPRISE — loaded at login
-let currentCompanyAssetCount=0; // Live count fetched at login, incremented on each save
+let currentCompanyTier=0;
+let currentCompanyAssetCount=0;
+let currentProjectId=null;     // project the user is working under
+let currentProjectName=null;   // display name for active project
+let userProjects=[];           // projects assigned to this user
 
 const FIELD_TIER_LABELS = {0:'BASIC', 1:'PRO', 2:'ENTERPRISE'};
 const FIELD_TIER_CAP    = {0:5000,   1:20000, 2:Infinity};
@@ -1027,6 +1042,19 @@ async function checkTenantAccessAtLogin(user){
       const countRes=await sb.query('assets',`?company_id=eq.${encodeURIComponent(user.company_id)}&select=id`);
       currentCompanyAssetCount = Array.isArray(countRes) ? countRes.length : 0;
     }catch(e){ currentCompanyAssetCount=0; }
+    // Fetch projects assigned to this user
+    try{
+      const assignRes=await sb.query('project_assignments',`?user_id=eq.${user.id}&select=project_id`);
+      if(Array.isArray(assignRes)&&assignRes.length){
+        const projIds=assignRes.map(a=>a.project_id);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=*`);
+        userProjects=Array.isArray(allProjRes)?allProjRes.filter(p=>projIds.includes(p.id)):[];
+      } else {
+        // No assignments — fetch all active projects for this company (admin/auditor fallback)
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=*`);
+        userProjects=Array.isArray(allProjRes)?allProjRes:[];
+      }
+    }catch(e){ userProjects=[]; }
     // Show warning banner if near cap
     checkAndShowCapBanner();
   }catch(e){
@@ -1178,8 +1206,61 @@ async function commitFirstLoginPassword(){
 }
 
 function completeLogin(){
+  // ── Project selector intercept ──────────────────────────────────
+  if(userProjects.length===0){
+    // No projects assigned — proceed with no project context
+    currentProjectId=null; currentProjectName=null;
+    goToApp();
+  } else if(userProjects.length===1){
+    // Exactly one project — auto-select silently
+    currentProjectId=userProjects[0].id;
+    currentProjectName=userProjects[0].name;
+    goToApp();
+  } else {
+    // Multiple projects — show selector screen
+    showProjectSelector();
+  }
+}
+
+function showProjectSelector(){
+  document.getElementById('login-screen').classList.add('hidden');
+  const sel=document.getElementById('project-selector-screen');
+  sel.style.display='flex';
+  const welcome=document.getElementById('proj-sel-welcome');
+  if(welcome) welcome.textContent='Welcome, '+(currentUser.name||currentUser.username)+'! Choose a project to work on:';
+  const list=document.getElementById('proj-sel-list');
+  if(list){
+    list.innerHTML=userProjects.map(p=>`
+      <button onclick="selectProjectAndGo('${p.id}','${p.name.replace(/'/g,"\\'")}')"
+        style="display:block;width:100%;text-align:left;padding:16px 18px;background:var(--surf);border:1.5px solid var(--border);border-radius:12px;margin-bottom:10px;cursor:pointer;transition:border-color .15s;">
+        <div style="font-family:var(--fh);font-size:14px;font-weight:900;color:var(--acc);margin-bottom:4px;">📁 ${p.name}</div>
+        ${p.description?`<div style="font-size:11px;color:var(--text3);">${p.description}</div>`:''}
+        ${p.start_date?`<div style="font-size:10px;color:var(--text3);margin-top:4px;">📅 ${p.start_date}${p.end_date?' → '+p.end_date:''}</div>`:''}
+      </button>`).join('');
+  }
+}
+
+function selectProjectAndGo(projId, projName){
+  currentProjectId=projId;
+  currentProjectName=projName;
+  const sel=document.getElementById('project-selector-screen');
+  if(sel) sel.style.display='none';
+  goToApp();
+}
+
+function goToApp(){
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('main-app').style.display='flex';
+  // Show active project badge on home screen if a project is set
+  const badge=document.getElementById('active-project-badge');
+  if(badge){
+    if(currentProjectName){
+      badge.style.display='';
+      badge.textContent='📁 '+currentProjectName;
+    } else {
+      badge.style.display='none';
+    }
+  }
   initApp();
 }
 
@@ -1187,6 +1268,8 @@ function completeLogin(){
 
 function doLogout(){
   currentUser=null;sessionAssets=[];sessionAudit=[];sessionFlags=[];
+  currentProjectId=null;currentProjectName=null;userProjects=[];
+  currentCompanyTier=0;currentCompanyAssetCount=0;
   // Reset lockout overlay so login screen is clean for next user
   const lockout=document.getElementById('lockout-screen');
   if(lockout) lockout.classList.remove('active');
@@ -2176,6 +2259,7 @@ async function saveAsset(){
     registered_from_audit:fromAudit,
     approval_status:'pending',
     company_id:currentUser.company_id||null,
+    project_id:currentProjectId||null,
     created_at:new Date().toISOString(),
     // GPS coordinates at time of capture (from captureLoginGPS)
     capture_lat:currentGPS.lat||'',
