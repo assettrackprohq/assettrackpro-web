@@ -386,6 +386,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <div class="sb-sect">Overview</div>
       <button class="nav-item on" onclick="show('dashboard')"><span class="ni">📊</span>Dashboard</button>
       <button class="nav-item" onclick="show('assets')"><span class="ni">📦</span>Asset Register</button>
+      <button class="nav-item" onclick="show('projects')"><span class="ni">📁</span>Projects</button>
       <button class="nav-item" onclick="show('audit-mgmt')"><span class="ni">✅</span>Audit Management</button>
       <div class="sb-sect">Platform</div>
       <button class="nav-item" id="nav-superowner" onclick="show('superowner')" style="display:none;"><span class="ni">👑</span>Super Owner <span class="so-badge" style="margin-left:4px;font-size:8px;padding:2px 6px;">PLATFORM</span></button>
@@ -545,6 +546,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           <div><div class="fl">Status</div><select class="fi" id="ast-status" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Category</div><select class="fi" id="ast-cat" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Department</div><select class="fi" id="ast-dept" onchange="renderAssets()"><option value="">All</option></select></div>
+          <div><div class="fl">Project</div><select class="fi" id="ast-project" onchange="renderAssets()"><option value="">All Projects</option></select></div>
           <div><div class="fl">Approval</div><select class="fi" id="ast-approval" onchange="renderAssets()"><option value="">All</option><option value="pending">🕐 Pending</option><option value="approved">✅ Approved</option><option value="rejected">❌ Rejected</option></select></div>
         </div>
       </div>
@@ -573,6 +575,24 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         </table>
         <div id="assets-empty" style="display:none;padding:30px;text-align:center;font-size:12px;color:var(--text3);">No assets found.</div>
       </div>
+    </div>
+
+    <!-- ══ PROJECTS ══ -->
+    <div class="panel" id="p-projects">
+      <div class="panel-hdr">
+        <div><div class="panel-ttl">📁 Projects</div><div class="panel-sub">Organise tagging exercises into projects and assign field agents</div></div>
+        <button class="act-btn btn-p" onclick="openAddProject()">+ New Project</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+        <input class="fi" type="text" id="proj-search" placeholder="Search projects…" oninput="renderProjects()" style="flex:1;min-width:160px;max-width:280px;">
+        <select class="fi" id="proj-status-filter" onchange="renderProjects()" style="max-width:160px;">
+          <option value="">All Status</option>
+          <option value="active">Active</option>
+          <option value="completed">Completed</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+      <div id="projects-list"></div>
     </div>
 
     <!-- ══ AUDIT MANAGEMENT ══ -->
@@ -827,63 +847,83 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
     <!-- ══ IMPORT DATA ══ -->
     <div class="panel" id="p-import">
       <div class="panel-hdr">
-        <div><div class="panel-ttl">Import Data</div><div class="panel-sub">Bulk upload asset register, taxonomy, locations, departments, companies</div></div>
+        <div><div class="panel-ttl">Import Data</div><div class="panel-sub">Upload assets, taxonomy, locations, departments and custodians</div></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:20px;">
-        <div onclick="selectImportTarget('assets')" id="imp-tab-assets" class="imp-tab" style="cursor:pointer;background:rgba(0,119,204,.08);border:2px solid var(--acc);border-radius:var(--r-sm);padding:16px;text-align:center;position:relative;grid-column:1/-1;">
+
+      <!-- Tab grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;">
+
+        <!-- Asset Register — PRO+ gated -->
+        <div onclick="selectImportTarget('assets')" id="imp-tab-assets" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;position:relative;grid-column:1/-1;">
           <div style="position:absolute;top:8px;right:10px;background:var(--acc);color:#fff;font-family:var(--fh,Arial);font-size:9px;font-weight:900;padding:2px 8px;border-radius:5px;letter-spacing:.5px;">AUDIT UPLOAD</div>
+          <div style="position:absolute;top:8px;left:10px;background:rgba(0,119,204,.15);color:var(--acc);font-family:var(--fh,Arial);font-size:9px;font-weight:900;padding:2px 8px;border-radius:5px;letter-spacing:.5px;">PRO+</div>
           <div style="font-size:26px;">📋</div>
           <div style="font-family:var(--fh,Arial);font-size:14px;font-weight:800;color:var(--text);margin-top:5px;">Asset Register</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px;">Upload existing assets for audit · Merge or replace</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px;">Bulk upload existing assets for audit · Merge or replace</div>
         </div>
-        <div onclick="selectImportTarget('taxonomy')" id="imp-tab-taxonomy" class="imp-tab imp-active" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;">
-          <div style="font-size:22px;">🏷️</div><div style="font-size:13px;font-weight:700;color:var(--text);margin-top:4px;">Taxonomy</div>
-          <div style="font-size:11px;color:var(--text2);">Categories & subcategories</div>
+
+        <!-- Taxonomy Import — ALL tiers -->
+        <div onclick="selectImportTarget('taxonomy-bulk')" id="imp-tab-taxonomy-bulk" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;position:relative;grid-column:1/-1;">
+          <div style="position:absolute;top:8px;right:10px;background:rgba(0,200,160,.15);color:var(--acc4);font-family:var(--fh,Arial);font-size:9px;font-weight:900;padding:2px 8px;border-radius:5px;letter-spacing:.5px;">ALL PLANS</div>
+          <div style="font-size:26px;">📊</div>
+          <div style="font-family:var(--fh,Arial);font-size:14px;font-weight:800;color:var(--text);margin-top:5px;">Taxonomy Import</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px;">Multi-sheet Excel — categories, locations, departments &amp; custodians in one upload</div>
         </div>
-        <div onclick="selectImportTarget('locations')" id="imp-tab-locations" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;">
-          <div style="font-size:22px;">📍</div><div style="font-size:13px;font-weight:700;color:var(--text);margin-top:4px;">Locations</div>
-          <div style="font-size:11px;color:var(--text2);">Site / building / room list</div>
+
+        <!-- Individual tabs — ALL tiers -->
+        <div onclick="selectImportTarget('taxonomy')" id="imp-tab-taxonomy" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:14px;text-align:center;">
+          <div style="font-size:20px;">🏷️</div><div style="font-size:12px;font-weight:700;color:var(--text);margin-top:4px;">Categories</div>
+          <div style="font-size:10px;color:var(--text2);">Categories &amp; subcategories</div>
         </div>
-        <div onclick="selectImportTarget('departments')" id="imp-tab-departments" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;">
-          <div style="font-size:22px;">🏢</div><div style="font-size:13px;font-weight:700;color:var(--text);margin-top:4px;">Departments</div>
-          <div style="font-size:11px;color:var(--text2);">Department / unit list</div>
+        <div onclick="selectImportTarget('locations')" id="imp-tab-locations" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:14px;text-align:center;">
+          <div style="font-size:20px;">📍</div><div style="font-size:12px;font-weight:700;color:var(--text);margin-top:4px;">Locations</div>
+          <div style="font-size:10px;color:var(--text2);">Site / building / room</div>
         </div>
-        <div onclick="selectImportTarget('companies')" id="imp-tab-companies" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:16px;text-align:center;">
-          <div style="font-size:22px;">🏭</div><div style="font-size:13px;font-weight:700;color:var(--text);margin-top:4px;">Companies</div>
-          <div style="font-size:11px;color:var(--text2);">Company / subsidiary list</div>
+        <div onclick="selectImportTarget('departments')" id="imp-tab-departments" class="imp-tab" style="cursor:pointer;background:var(--surf2);border:2px solid var(--border);border-radius:var(--r-sm);padding:14px;text-align:center;">
+          <div style="font-size:20px;">🏢</div><div style="font-size:12px;font-weight:700;color:var(--text);margin-top:4px;">Departments</div>
+          <div style="font-size:10px;color:var(--text2);">Department / unit list</div>
         </div>
       </div>
 
-      <div id="imp-instructions" style="background:var(--surf2);border-radius:var(--r-sm);padding:14px;margin-bottom:16px;font-size:12px;color:var(--text2);line-height:1.8;">
-        <strong style="color:var(--text);">Taxonomy format (CSV/Excel):</strong><br>
-        Columns: <code style="color:var(--acc);">Category | Subcategory | Asset Name</code><br>
-        Example: <em>IT Equipment, Laptops, Dell XPS 15</em><br>
-        Asset Name is optional — rows with only Category + Subcategory add a subcategory without items.
-      </div>
+      <!-- Instructions block -->
+      <div id="imp-instructions" style="background:var(--surf2);border-radius:var(--r-sm);padding:14px;margin-bottom:14px;font-size:12px;color:var(--text2);line-height:1.8;"></div>
 
+      <!-- Template download row -->
       <div id="imp-template-row" style="display:none;margin-bottom:14px;">
-        <button onclick="downloadAuditTemplate()" style="display:flex;align-items:center;gap:10px;background:rgba(0,119,204,.08);border:2px solid rgba(0,119,204,.25);border-radius:var(--r-sm);padding:14px 18px;cursor:pointer;width:100%;text-align:left;transition:background .15s;">
+        <button id="imp-template-btn" onclick="downloadImportTemplate()" style="display:flex;align-items:center;gap:10px;background:rgba(0,119,204,.08);border:2px solid rgba(0,119,204,.25);border-radius:var(--r-sm);padding:14px 18px;cursor:pointer;width:100%;text-align:left;">
           <span style="font-size:22px;">⬇</span>
           <div>
-            <div style="font-family:var(--fh,Arial);font-size:13px;font-weight:800;color:var(--acc);">Download CSV Template</div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px;">Get correct column headers with an example row — fill and upload</div>
+            <div id="imp-template-label" style="font-family:var(--fh,Arial);font-size:13px;font-weight:800;color:var(--acc);">Download Template</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px;">Get the correct format with column headers and example rows</div>
           </div>
         </button>
       </div>
-      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
-        <label style="flex:1;min-width:200px;">
-          <input type="file" id="imp-file" accept=".csv,.xlsx,.xls" onchange="handleImportFile(this)" style="display:none;">
-          <div onclick="document.getElementById('imp-file').click()" style="background:var(--surf3);border:2px dashed var(--border);border-radius:var(--r-sm);padding:18px;text-align:center;cursor:pointer;font-size:13px;color:var(--text2);">
-            📂 Click to select CSV or Excel file
+
+      <!-- PRO gate banner — shown when BASIC user clicks Asset Register tab -->
+      <div id="imp-pro-gate" style="display:none;background:rgba(0,119,204,.07);border:2px solid rgba(0,119,204,.25);border-radius:var(--r-sm);padding:20px;text-align:center;margin-bottom:14px;">
+        <div style="font-size:24px;margin-bottom:8px;">⚡</div>
+        <div style="font-family:var(--fh,Arial);font-size:15px;font-weight:900;color:var(--acc);margin-bottom:6px;">PRO Plan Required</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:14px;">Bulk asset import is available on PRO and ENTERPRISE plans.</div>
+        <button class="act-btn btn-p" onclick="showUpgradeModal(1)">⚡ Upgrade to PRO</button>
+      </div>
+
+      <!-- File uploader -->
+      <div id="imp-uploader" style="display:none;">
+        <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+          <label style="flex:1;min-width:200px;">
+            <input type="file" id="imp-file" accept=".csv,.xlsx,.xls" onchange="handleImportFile(this)" style="display:none;">
+            <div onclick="document.getElementById('imp-file').click()" style="background:var(--surf3);border:2px dashed var(--border);border-radius:var(--r-sm);padding:18px;text-align:center;cursor:pointer;font-size:13px;color:var(--text2);">
+              📂 Click to select CSV or Excel file
+            </div>
+          </label>
+          <div id="imp-mode-wrap" style="display:flex;flex-direction:column;gap:8px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;">
+              <input type="radio" name="imp-mode" value="merge" checked id="imp-merge"> Merge (add to existing)
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;">
+              <input type="radio" name="imp-mode" value="replace" id="imp-replace"> Replace (overwrite all)
+            </label>
           </div>
-        </label>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;">
-            <input type="radio" name="imp-mode" value="merge" checked id="imp-merge"> Merge (add to existing)
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;">
-            <input type="radio" name="imp-mode" value="replace" id="imp-replace"> Replace (overwrite all)
-          </label>
         </div>
       </div>
 
@@ -1473,7 +1513,57 @@ create policy if not exists "Update companies" on companies
 create policy if not exists "Insert companies" on companies
   for insert with check (true);
 create policy if not exists "Delete companies" on companies
-  for delete using (true);</div>
+  for delete using (true);
+
+-- ══════════════════════════════════════════
+-- PHASE 1A: PROJECTS (run once)
+-- ══════════════════════════════════════════
+
+-- 1. Projects table
+create table if not exists projects (
+  id text primary key,
+  company_id text references companies(id),
+  name text not null,
+  description text,
+  status text default 'active',   -- active | completed | archived
+  start_date date,
+  end_date date,
+  created_by text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+alter table projects enable row level security;
+create policy if not exists "Read projects open"   on projects for select using (true);
+create policy if not exists "Insert projects open" on projects for insert with check (true);
+create policy if not exists "Update projects open" on projects for update using (true);
+create policy if not exists "Delete projects open" on projects for delete using (true);
+
+-- 2. Project assignments (links field users to projects)
+create table if not exists project_assignments (
+  id uuid primary key default gen_random_uuid(),
+  project_id text references projects(id) on delete cascade,
+  user_id uuid references users(id) on delete cascade,
+  company_id text references companies(id),
+  assigned_by text,
+  assigned_at timestamptz default now(),
+  unique(project_id, user_id)
+);
+alter table project_assignments enable row level security;
+create policy if not exists "Read assignments open"   on project_assignments for select using (true);
+create policy if not exists "Insert assignments open" on project_assignments for insert with check (true);
+create policy if not exists "Update assignments open" on project_assignments for update using (true);
+create policy if not exists "Delete assignments open" on project_assignments for delete using (true);
+
+-- 3. Add project_id to assets
+alter table assets add column if not exists project_id text references projects(id);
+
+-- 4. GPS columns (Field App)
+alter table assets add column if not exists capture_lat      text;
+alter table assets add column if not exists capture_lng      text;
+alter table assets add column if not exists capture_location text;
+
+-- Index for fast project-scoped asset queries
+create index if not exists assets_project_id on assets(project_id);</div>
       </div>
 
       <div class="card">
@@ -1937,6 +2027,8 @@ let currentUser=null;
 let allAssets=[];
 let allUsers=[];
 let auditLog=[];
+let allProjects=[];        // projects for active company
+let allAssignments=[];     // project_assignments for active company
 
 // ── Multi-company state ──
 let allCompanies=[];          // all company records
@@ -3043,7 +3135,7 @@ function completeLogin(user){
 }
 
 function doLogout(){
-  currentUser=null;allAssets=[];allUsers=[];pendingFirstLoginUser=null;
+  currentUser=null;allAssets=[];allUsers=[];allProjects=[];allAssignments=[];pendingFirstLoginUser=null;
   LICENCE_GATE_ACTIVE=false;
   const banner=document.getElementById('licence-gate-banner');
   if(banner){banner.className='';banner.style.display='none';}
@@ -3111,6 +3203,16 @@ async function initAdmin(){
 
       auditLog=await sb.query('audit_log','?select=*&order=audited_at.desc&limit=500');
       if(!Array.isArray(auditLog))auditLog=[];
+
+      // ── Step 4: Load projects for active company ──
+      if(activeCompanyId){
+        try{
+          allProjects=await sb.query('projects',`?company_id=eq.${activeCompanyId}&select=*&order=created_at.desc`);
+          if(!Array.isArray(allProjects))allProjects=[];
+          allAssignments=await sb.query('project_assignments',`?company_id=eq.${activeCompanyId}&select=*`);
+          if(!Array.isArray(allAssignments))allAssignments=[];
+        }catch(e){ allProjects=[]; allAssignments=[]; }
+      }
 
       // ── Step 4: Load config for active company ──
       if(activeCompanyId) await loadCompanyConfig(activeCompanyId);
@@ -3237,10 +3339,10 @@ const TIER_PANEL_MAP = {
   'customfields'   : 1,   // PRO+ only — Custom Fields
   'companies'      : 1,   // PRO+ only — Multi-Company management
   'audit-mgmt'     : 1,   // PRO+ only — Audit Management
-  'import'         : 1,   // PRO+ only — Excel Import
   'approval-wf'    : 2,   // ENTERPRISE — Approval Workflows
   'api-access'     : 2,   // ENTERPRISE — API Access
-  'offline-sync'   : 2,   // ENTERPRISE — Offline Field Sync
+  // offline-sync: intentionally NOT gated — available to all tiers when built
+  // import: intentionally NOT gated at panel level — tab-level gating inside selectImportTarget()
 };
 
 const TIER_ASSET_CAP = { 0: 5000, 1: 20000, 2: Infinity };
@@ -3378,6 +3480,7 @@ function show(name){
   // Panel-specific init
   if(name==='activity'){loadActivityHistory();}
   if(name==='superowner'){renderSuperOwner();}
+  if(name==='projects'){renderProjects();}
   if(name==='companies'){renderCompanies();}
   if(name==='assets'){
     if(CONFIGURED&&activeCompanyId){
@@ -3507,16 +3610,27 @@ function renderAssets(){
   var cat=(document.getElementById('ast-cat')||{}).value||'';
   var dept=(document.getElementById('ast-dept')||{}).value||'';
   var apv=(document.getElementById('ast-approval')||{}).value||'';
+  var proj=(document.getElementById('ast-project')||{}).value||'';
   var scopedAssets=activeCompanyId?allAssets.filter(function(a){return a.company_id===activeCompanyId;}):allAssets;
   var filtered=scopedAssets.filter(function(a){
     var mq=!q||a.name.toLowerCase().includes(q.toLowerCase())||a.barcode.toLowerCase().includes(q.toLowerCase());
     var ms=!st||a.status===st;var mc=!cat||a.category===cat;var md=!dept||a.department===dept;
     var ma=!apv||(a.approval_status||'pending')===apv;
-    return mq&&ms&&mc&&md&&ma;
+    var mp=!proj||(a.project_id||'')=== proj;
+    return mq&&ms&&mc&&md&&ma&&mp;
   });
   var tbody=document.getElementById('assets-tbody');var empty=document.getElementById('assets-empty');
   var selAll=document.getElementById('assets-select-all');if(selAll)selAll.checked=false;
   updateBulkBar();
+
+  // Populate project filter dropdown
+  const projSel=document.getElementById('ast-project');
+  if(projSel&&allProjects.length){
+    const curVal=projSel.value;
+    projSel.innerHTML='<option value="">All Projects</option>'+
+      allProjects.filter(p=>p.status!=='archived').map(p=>`<option value="${p.id}"${p.id===curVal?' selected':''}>${p.name}</option>`).join('');
+  }
+
   if(!filtered.length){tbody.innerHTML='';empty.style.display='block';return;}
   empty.style.display='none';
   var canApprove=currentUser&&['admin','sub_admin','super_owner'].includes(currentUser.role);
@@ -3526,10 +3640,12 @@ function renderAssets(){
     var apvS=a.approval_status||'pending';
     var appBtn=canApprove&&apvS!=='approved'?'<button class="act-btn" style="padding:4px 8px;font-size:9px;background:rgba(0,153,107,.15);color:var(--acc4);border:1px solid rgba(0,153,107,.3);border-radius:8px;cursor:pointer;margin-left:3px;" data-id="'+a.id+'" onclick="approveAsset(this.dataset.id)">&#x2705;</button>':'';
     var rejBtn=canApprove&&apvS!=='rejected'?'<button class="act-btn" style="padding:4px 8px;font-size:9px;background:rgba(214,48,64,.1);color:var(--acc3);border:1px solid rgba(214,48,64,.25);border-radius:8px;cursor:pointer;margin-left:3px;" data-id="'+a.id+'" onclick="openRejectModal(this.dataset.id)">&#x274C;</button>':'';
+    var projObj=a.project_id?allProjects.find(function(p){return p.id===a.project_id;}):null;
+    var projBadge=projObj?'<div style="font-size:9px;color:var(--acc5);margin-top:2px;">📁 '+projObj.name+'</div>':'';
     return '<tr>'+
       '<td><input type="checkbox" class="asset-cb" data-id="'+a.id+'" style="accent-color:var(--acc3);width:14px;height:14px;cursor:pointer;" onchange="updateBulkBar()"></td>'+
       '<td>'+th+'</td>'+
-      '<td><div style="font-size:12px;color:var(--text);">'+a.name+'</div><div style="font-size:9px;color:var(--text3);">'+(a.category||'')+(a.sub_category?' > '+a.sub_category:'')+'</div></td>'+
+      '<td><div style="font-size:12px;color:var(--text);">'+a.name+'</div><div style="font-size:9px;color:var(--text3);">'+(a.category||'')+(a.sub_category?' > '+a.sub_category:'')+'</div>'+projBadge+'</td>'+
       '<td style="font-family:monospace;font-size:10px;color:var(--acc);">'+a.barcode+'</td>'+
       '<td style="font-size:11px;color:var(--text2);">'+(a.category||'--')+'</td>'+
       '<td style="font-size:11px;color:var(--text2);">'+(a.location||'--')+'</td>'+
@@ -5709,29 +5825,87 @@ const IMP_INSTRUCTIONS={
     <div style="margin-top:10px;padding:8px 12px;background:rgba(0,119,204,.07);border-radius:8px;color:var(--text2);">
       💡 Use <strong>Merge</strong> to add without overwriting. Use <strong>Replace</strong> for full migration.
     </div></div>`,
-  taxonomy: '<strong style="color:var(--text);">Taxonomy (CSV/Excel):</strong> Columns: <code style="color:var(--acc);">Category | Subcategory | Asset Name</code> — Asset Name is optional.',
-  locations: '<strong style="color:var(--text);">Locations (CSV/Excel):</strong> One column: <code style="color:var(--acc);">Location Name</code> — one location per row.',
-  departments: '<strong style="color:var(--text);">Departments (CSV/Excel):</strong> One column: <code style="color:var(--acc);">Department Name</code> — one department per row.',
-  companies: '<strong style="color:var(--text);">Companies (CSV/Excel):</strong> Columns: <code style="color:var(--acc);">Company Name | Industry | Parent Company (optional)</code>',
+
+  'taxonomy-bulk':`<div style="line-height:1.9;font-size:12px;">
+    <div style="font-family:var(--fh,Arial);font-size:13px;font-weight:800;color:var(--text);margin-bottom:8px;">📊 Taxonomy Import — Multi-Sheet Excel Upload</div>
+    <div style="margin-bottom:10px;color:var(--text2);">Upload a single Excel file with up to 4 named sheets — the system reads each sheet independently and populates the correct dropdown lists.</div>
+    <table style="font-size:11px;width:100%;border-collapse:collapse;"><thead><tr>
+      <th style="text-align:left;padding:3px 8px 3px 0;color:var(--acc);font-weight:800;">Sheet Name</th>
+      <th style="text-align:left;padding:3px 8px;color:var(--text2);font-weight:600;">Columns</th>
+      <th style="text-align:left;padding:3px 0;color:var(--text2);font-weight:600;">What it populates</th>
+    </tr></thead><tbody>
+      <tr><td style="padding:4px 8px 4px 0;color:var(--acc);font-weight:800;">Categories</td><td style="padding:4px 8px;color:var(--text2);">Category · Subcategory · Asset Name (opt)</td><td style="color:var(--text2);">Category & subcategory dropdowns</td></tr>
+      <tr><td style="padding:4px 8px 4px 0;color:var(--acc);font-weight:800;">Locations</td><td style="padding:4px 8px;color:var(--text2);">Location Name</td><td style="color:var(--text2);">Location dropdown</td></tr>
+      <tr><td style="padding:4px 8px 4px 0;color:var(--acc);font-weight:800;">Departments</td><td style="padding:4px 8px;color:var(--text2);">Department Name</td><td style="color:var(--text2);">Department dropdown</td></tr>
+      <tr><td style="padding:4px 8px 4px 0;color:var(--acc);font-weight:800;">Custodians</td><td style="padding:4px 8px;color:var(--text2);">Custodian Name</td><td style="color:var(--text2);">Custodian dropdown</td></tr>
+    </tbody></table>
+    <div style="margin-top:10px;padding:8px 12px;background:rgba(0,200,160,.07);border-radius:8px;color:var(--text2);">
+      💡 Download the template below — it has all 4 sheets pre-named and formatted. You only need to fill the sheets relevant to your setup. Sheets you leave empty are safely ignored.
+    </div></div>`,
+
+  taxonomy: `<strong style="color:var(--text);">Categories (CSV/Excel):</strong> Columns: <code style="color:var(--acc);">Category | Subcategory | Asset Name (optional)</code><br>
+    Example row: <em>IT Equipment, Laptops, Dell XPS 15</em>`,
+
+  locations: `<strong style="color:var(--text);">Locations (CSV/Excel):</strong> One column: <code style="color:var(--acc);">Location Name</code> — one location per row.<br>
+    Example: <em>Head Office - Floor 1, Head Office - Floor 2, Warehouse A</em>`,
+
+  departments: `<strong style="color:var(--text);">Departments (CSV/Excel):</strong> One column: <code style="color:var(--acc);">Department Name</code> — one department per row.<br>
+    Example: <em>Finance, Human Resources, ICT Department</em>`,
 };
 
 function initImportPanel(){
-  selectImportTarget('assets');
+  selectImportTarget('taxonomy-bulk');
 }
 
 function selectImportTarget(t){
   importTarget=t;
   importRows=[];
-  ['assets','taxonomy','locations','departments','companies'].forEach(k=>{
+
+  // Resolve current tier
+  const tier = APP_ENVIRONMENT==='ENTERPRISE_ONPREM'
+    ? ONPREM_LICENSE_TIER
+    : (activeCompany?(Number(activeCompany.tier)||0):0);
+
+  const ALL_TABS=['assets','taxonomy-bulk','taxonomy','locations','departments'];
+  ALL_TABS.forEach(k=>{
     const tab=document.getElementById('imp-tab-'+k);
     if(tab){
       tab.style.border=k===t?'2px solid var(--acc)':'2px solid var(--border)';
+      tab.style.background=k===t?'rgba(0,119,204,.08)':'var(--surf2)';
     }
   });
-  const tmpl=document.getElementById('imp-template-row');
-  if(tmpl)tmpl.style.display=t==='assets'?'block':'none';
-  const instr=document.getElementById('imp-instructions');
-  if(instr)instr.innerHTML=IMP_INSTRUCTIONS[t]||'';
+
+  const proGate   = document.getElementById('imp-pro-gate');
+  const uploader  = document.getElementById('imp-uploader');
+  const tmplRow   = document.getElementById('imp-template-row');
+  const tmplLabel = document.getElementById('imp-template-label');
+  const instr     = document.getElementById('imp-instructions');
+
+  // Asset Register — PRO+ only
+  if(t==='assets' && tier < 1 && !isSuperOwner()){
+    if(instr) instr.innerHTML = IMP_INSTRUCTIONS['assets']||'';
+    if(proGate)  proGate.style.display  = '';
+    if(uploader) uploader.style.display = 'none';
+    if(tmplRow)  tmplRow.style.display  = 'none';
+    clearImport();
+    return;
+  }
+
+  if(proGate)  proGate.style.display  = 'none';
+  if(uploader) uploader.style.display = '';
+  if(instr)    instr.innerHTML = IMP_INSTRUCTIONS[t]||'';
+
+  // Template button — shown for all tabs with a label per tab
+  const tmplLabels = {
+    'assets'        : '⬇ Download CSV Template — Asset Register',
+    'taxonomy-bulk' : '⬇ Download Excel Template — All 4 Sheets (Categories · Locations · Departments · Custodians)',
+    'taxonomy'      : '⬇ Download CSV Template — Categories',
+    'locations'     : '⬇ Download CSV Template — Locations',
+    'departments'   : '⬇ Download CSV Template — Departments',
+  };
+  if(tmplRow)  tmplRow.style.display  = '';
+  if(tmplLabel) tmplLabel.textContent = tmplLabels[t]||'Download Template';
+
   clearImport();
 }
 
@@ -5740,24 +5914,60 @@ async function handleImportFile(input){
   if(!file)return;
   const ext=file.name.split('.').pop().toLowerCase();
   try{
-    if(ext==='csv'){
+    if(importTarget==='taxonomy-bulk'){
+      if(ext==='csv'){toast('Taxonomy Import requires an Excel (.xlsx) file — use Download Template to get the format','err');input.value='';return;}
+      const buf=await file.arrayBuffer();
+      const XLSX=await loadSheetJS();
+      const wb=XLSX.read(buf,{type:'array'});
+      window._taxonomyBulkData={};
+      ['Categories','Locations','Departments','Custodians'].forEach(sn=>{
+        const ws=wb.Sheets[sn];
+        if(ws){
+          window._taxonomyBulkData[sn]=XLSX.utils.sheet_to_json(ws,{header:1,defval:''})
+            .filter(r=>r.some(c=>String(c).trim()));
+        }
+      });
+      showTaxonomyBulkPreview();
+    } else if(ext==='csv'){
       const text=await file.text();
       importRows=parseCSV(text);
+      showImportPreview();
     } else {
-      // Excel via SheetJS
       const buf=await file.arrayBuffer();
       const XLSX=await loadSheetJS();
       const wb=XLSX.read(buf,{type:'array'});
       const ws=wb.Sheets[wb.SheetNames[0]];
       importRows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''})
         .filter(r=>r.some(c=>String(c).trim()));
+      showImportPreview();
     }
-    showImportPreview();
   }catch(e){
     toast('Could not read file: '+e.message,'err');
   }
   input.value='';
 }
+
+function showTaxonomyBulkPreview(){
+  const data=window._taxonomyBulkData||{};
+  const preview=document.getElementById('imp-preview');
+  const thead=document.getElementById('imp-thead');
+  const tbody=document.getElementById('imp-tbody');
+  const countEl=document.getElementById('imp-count');
+  if(!preview||!thead||!tbody)return;
+  const rows=[];
+  Object.entries(data).forEach(([sheet,sheetRows])=>{
+    sheetRows.slice(1,6).forEach(r=>{ // skip header, show up to 5 rows per sheet
+      rows.push([sheet,...r]);
+    });
+  });
+  const total=Object.values(data).reduce((s,r)=>s+(r.length>1?r.length-1:0),0);
+  thead.innerHTML='<tr>'+['Sheet','Value 1','Value 2','Value 3'].map(h=>`<th style="padding:8px 10px;text-align:left;color:var(--text2);font-size:11px;">${h}</th>`).join('')+'</tr>';
+  tbody.innerHTML=rows.map(r=>'<tr>'+r.slice(0,4).map(c=>`<td style="padding:7px 10px;border-top:1px solid var(--border);font-size:11px;color:var(--text);">${String(c||'').trim()}</td>`).join('')+'</tr>').join('');
+  if(countEl)countEl.textContent=total+' data rows across '+(Object.keys(data).length)+' sheet(s)';
+  preview.style.display='';
+}
+
+
 
 function parseCSV(text){
   return text.split('\n')
@@ -5807,6 +6017,7 @@ function showImportPreview(){
 function getImportHeaders(){
   const h={
     assets:['Barcode *','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial No.','Notes'],
+    'taxonomy-bulk':['Sheet','Row Type','Value 1','Value 2 (optional)','Value 3 (optional)'],
     taxonomy:['Category','Subcategory','Asset Name (optional)'],
     locations:['Location Name'],
     departments:['Department Name'],
@@ -5826,20 +6037,146 @@ function clearImport(){
 }
 
 
-function downloadAuditTemplate(){
-  const headers=['Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial No.','Notes'];
-  const example=['ASSET-001','Dell Laptop XPS 15','IT Equipment','Laptops','Head Office - Floor 2','ICT Department','Active','Good','John Eze','SN-DL123456',''];
-  const csv=[headers.join(','),example.map(v=>'"'+v+'"').join(',')].join('\n');
+function downloadImportTemplate(){
+  const XLSX_AVAIL = typeof XLSX !== 'undefined';
+  if(importTarget==='taxonomy-bulk'){
+    // Multi-sheet Excel template
+    if(!XLSX_AVAIL){ toast('Loading Excel library — please try again in a moment','info'); loadSheetJS().then(()=>toast('Ready — click Download Template again','ok')); return; }
+    const wb=XLSX.utils.book_new();
+    // Sheet 1: Categories
+    const catData=[
+      ['Category','Subcategory','Asset Name (optional)'],
+      ['IT Equipment','Laptops','Dell XPS 15'],
+      ['IT Equipment','Desktops',''],
+      ['Furniture','Chairs','Executive Chair'],
+      ['Furniture','Tables',''],
+    ];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(catData),'Categories');
+    // Sheet 2: Locations
+    const locData=[['Location Name'],['Head Office - Floor 1'],['Head Office - Floor 2'],['Warehouse A'],['Warehouse B']];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(locData),'Locations');
+    // Sheet 3: Departments
+    const deptData=[['Department Name'],['Finance'],['Human Resources'],['ICT Department'],['Operations']];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(deptData),'Departments');
+    // Sheet 4: Custodians
+    const custData=[['Custodian Name'],['John Eze'],['Amaka Obi'],['Tunde Adeyemi']];
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(custData),'Custodians');
+    XLSX.writeFile(wb,'AssetTrackPro_TaxonomyImport_Template.xlsx');
+    toast('Excel template downloaded ✓','ok');
+    return;
+  }
+  // CSV templates for individual tabs
+  const templates={
+    assets:{
+      headers:['Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial No.','Notes'],
+      example:['ASSET-001','Dell Laptop XPS 15','IT Equipment','Laptops','Head Office - Floor 2','ICT Department','Active','Good','John Eze','SN-DL123456',''],
+      filename:'AssetRegister_AuditUpload_Template.csv',
+    },
+    taxonomy:{
+      headers:['Category','Subcategory','Asset Name (optional)'],
+      example:['IT Equipment','Laptops','Dell XPS 15'],
+      filename:'AssetTrackPro_Categories_Template.csv',
+    },
+    locations:{
+      headers:['Location Name'],
+      example:['Head Office - Floor 1'],
+      filename:'AssetTrackPro_Locations_Template.csv',
+    },
+    departments:{
+      headers:['Department Name'],
+      example:['Finance'],
+      filename:'AssetTrackPro_Departments_Template.csv',
+    },
+  };
+  const t=templates[importTarget];
+  if(!t){toast('No template available for this tab','err');return;}
+  const csv=[t.headers.join(','),t.example.map(v=>'"'+v+'"').join(',')].join('\n');
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='AssetRegister_AuditUpload_Template.csv';a.click();
-  URL.revokeObjectURL(url);toast('Template downloaded ✓','ok');
+  const a=document.createElement('a');
+  document.body.appendChild(a);
+  a.href=url;a.download=t.filename;a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},300);
+  toast('Template downloaded ✓','ok');
 }
 
+// Keep old name as alias so any existing onclick references still work
+function downloadAuditTemplate(){ importTarget='assets'; downloadImportTemplate(); }
+
 function commitImport(){
-  if(!importRows.length){toast('No data to import','err');return;}
+  if(!importRows.length && importTarget!=='taxonomy-bulk'){toast('No data to import','err');return;}
   const mode=document.querySelector('input[name="imp-mode"]:checked')?.value||'merge';
   let added=0, skipped=0;
+
+  // ── Taxonomy Bulk (multi-sheet) ──────────────────────────────────────
+  if(importTarget==='taxonomy-bulk'){
+    const data=window._taxonomyBulkData||{};
+    if(!Object.keys(data).length){toast('No data loaded — upload an Excel file first','err');return;}
+
+    // Categories sheet
+    const catRows=(data['Categories']||[]).filter(r=>r.some(c=>String(c).trim()));
+    const catData=catRows[0]&&/category/i.test(String(catRows[0][0]))?catRows.slice(1):catRows;
+    if(mode==='replace') Object.keys(TAXONOMY).forEach(k=>delete TAXONOMY[k]);
+    catData.forEach(r=>{
+      const cat=String(r[0]||'').trim(); const sub=String(r[1]||'').trim(); const item=String(r[2]||'').trim();
+      if(!cat){skipped++;return;}
+      if(!TAXONOMY[cat])TAXONOMY[cat]={};
+      if(!sub){added++;return;}
+      if(!TAXONOMY[cat][sub])TAXONOMY[cat][sub]=[];
+      if(!item){added++;return;}
+      if(!TAXONOMY[cat][sub].includes(item)){TAXONOMY[cat][sub].push(item);added++;}
+      else skipped++;
+    });
+    saveTaxonomy();
+    populateTaxonomyEditor();
+
+    // Locations sheet
+    const locRows=(data['Locations']||[]).filter(r=>String(r[0]||'').trim());
+    const locData=locRows[0]&&/location/i.test(String(locRows[0][0]))?locRows.slice(1):locRows;
+    const curLoc=mode==='replace'?[]:JSON.parse(JSON.stringify(LOCATIONS));
+    locData.forEach(r=>{
+      const v=String(r[0]||'').trim();
+      if(!v){skipped++;return;}
+      if(!curLoc.includes(v)){curLoc.push(v);added++;}else skipped++;
+    });
+    LOCATIONS.splice(0,LOCATIONS.length,...curLoc);
+
+    // Departments sheet
+    const deptRows=(data['Departments']||[]).filter(r=>String(r[0]||'').trim());
+    const deptData=deptRows[0]&&/department/i.test(String(deptRows[0][0]))?deptRows.slice(1):deptRows;
+    const curDept=mode==='replace'?[]:JSON.parse(JSON.stringify(DEPARTMENTS));
+    deptData.forEach(r=>{
+      const v=String(r[0]||'').trim();
+      if(!v){skipped++;return;}
+      if(!curDept.includes(v)){curDept.push(v);added++;}else skipped++;
+    });
+    DEPARTMENTS.splice(0,DEPARTMENTS.length,...curDept);
+
+    // Custodians sheet — stored in config
+    const custRows=(data['Custodians']||[]).filter(r=>String(r[0]||'').trim());
+    const custData=custRows[0]&&/custodian/i.test(String(custRows[0][0]))?custRows.slice(1):custRows;
+    const curCust=mode==='replace'?[]:JSON.parse(JSON.stringify(CUSTODIANS||[]));
+    custData.forEach(r=>{
+      const v=String(r[0]||'').trim();
+      if(!v){skipped++;return;}
+      if(!curCust.includes(v)){curCust.push(v);added++;}else skipped++;
+    });
+    if(typeof CUSTODIANS!=='undefined') CUSTODIANS.splice(0,CUSTODIANS.length,...curCust);
+
+    saveLocsDepts();
+
+    const result=document.getElementById('imp-result');
+    if(result){
+      result.style.display='';
+      result.innerHTML=`<div style="background:rgba(0,200,160,.1);border:1px solid var(--acc4);border-radius:var(--r-sm);padding:14px;font-size:13px;color:var(--text);">
+        ✅ Taxonomy import complete — <strong>${added}</strong> records added, <strong>${skipped}</strong> skipped (duplicates or blank).
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">Go to <strong>Asset Taxonomy</strong> and <strong>Locations &amp; Depts</strong> to verify.</div>
+      </div>`;
+    }
+    clearImport();
+    toast(`Taxonomy imported — ${added} records added`,'ok');
+    return;
+  }
 
   if(importTarget==='assets'){
     const firstCell=String(importRows[0]?.[0]||'').toLowerCase().trim();
@@ -6663,6 +7000,240 @@ function toggleTheme(){
   const lbl=document.getElementById('theme-label');
   if(icon)icon.textContent=next==='dark'?'☀️':'🌙';
   if(lbl)lbl.textContent=next==='dark'?'Light Mode':'Dark Mode';
+}
+
+// ══════════════════════════════════════════════════════
+// PROJECTS — Phase 1A
+// ══════════════════════════════════════════════════════
+
+function renderProjects(){
+  const q=(document.getElementById('proj-search')||{}).value||'';
+  const sf=(document.getElementById('proj-status-filter')||{}).value||'';
+  const list=document.getElementById('projects-list');
+  if(!list)return;
+
+  const scoped=allProjects.filter(p=>
+    (!q||p.name.toLowerCase().includes(q.toLowerCase())||( p.description||'').toLowerCase().includes(q.toLowerCase()))&&
+    (!sf||p.status===sf)
+  );
+
+  if(!scoped.length){
+    list.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px;">
+      No projects yet. Click <strong>+ New Project</strong> to create one.
+    </div>`;
+    return;
+  }
+
+  list.innerHTML=scoped.map(p=>{
+    const assignees=allAssignments.filter(a=>a.project_id===p.id);
+    const assignedUsers=assignees.map(a=>{
+      const u=allUsers.find(u=>u.id===a.user_id);
+      return u?u.name||u.username:'?';
+    });
+    const assetCount=allAssets.filter(a=>a.project_id===p.id).length;
+    const statusColor={active:'var(--acc4)',completed:'var(--acc)',archived:'var(--text3)'}[p.status]||'var(--text3)';
+    const statusBg={active:'rgba(0,153,107,.1)',completed:'rgba(0,119,204,.1)',archived:'rgba(150,150,150,.1)'}[p.status]||'';
+    return `<div style="background:var(--surf);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span style="font-family:var(--fh);font-size:14px;font-weight:900;color:var(--text);">${p.name}</span>
+            <span style="font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.6px;background:${statusBg};color:${statusColor};">${p.status.toUpperCase()}</span>
+          </div>
+          ${p.description?`<div style="font-size:11px;color:var(--text3);margin-bottom:8px;">${p.description}</div>`:''}
+          <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <span style="font-size:10px;color:var(--text3);">📦 <strong style="color:var(--text);">${assetCount}</strong> asset${assetCount!==1?'s':''}</span>
+            ${p.start_date?`<span style="font-size:10px;color:var(--text3);">📅 <strong style="color:var(--text);">${p.start_date}</strong>${p.end_date?' → '+p.end_date:''}</span>`:''}
+            <span style="font-size:10px;color:var(--text3);">👤 <strong style="color:var(--text);">${assignedUsers.length}</strong> agent${assignedUsers.length!==1?'s':''} assigned${assignedUsers.length?': '+assignedUsers.slice(0,3).join(', ')+(assignedUsers.length>3?' +more':''):''}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="openAssignProject('${p.id}')">👥 Assign</button>
+          <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="openEditProject('${p.id}')">✏ Edit</button>
+          <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="filterAssetsByProject('${p.id}')">📦 Assets</button>
+          ${p.status==='active'?`<button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;opacity:.7;" onclick="setProjectStatus('${p.id}','completed')">✅ Complete</button>`:''}
+          ${p.status!=='archived'?`<button class="act-btn btn-d" style="padding:5px 10px;font-size:10px;" onclick="setProjectStatus('${p.id}','archived')">🗄 Archive</button>`:''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openAddProject(){
+  openModal(`
+    <div class="modal-ttl">📁 New Project</div>
+    <div class="fgrid">
+      <div class="fg" style="grid-column:1/-1;"><div class="fl">Project Name <span class="req">REQUIRED</span></div><input class="fi" id="np-name" placeholder="e.g. 2025 Annual Asset Audit"></div>
+      <div class="fg" style="grid-column:1/-1;"><div class="fl">Description</div><textarea class="fi" id="np-desc" rows="2" placeholder="Brief description of this tagging exercise…" style="resize:vertical;"></textarea></div>
+      <div class="fg"><div class="fl">Start Date</div><input class="fi" type="date" id="np-start"></div>
+      <div class="fg"><div class="fl">End Date</div><input class="fi" type="date" id="np-end"></div>
+    </div>
+    <div class="modal-acts">
+      <button class="act-btn btn-s" onclick="closeModal()">Cancel</button>
+      <button class="act-btn btn-p" onclick="saveNewProject()">Create Project</button>
+    </div>
+  `);
+  setTimeout(()=>{ const el=document.getElementById('np-name'); if(el)el.focus(); },120);
+}
+
+async function saveNewProject(){
+  const name=(document.getElementById('np-name')||{}).value||'';
+  if(!name.trim()){toast('Project name is required','err');return;}
+  const project={
+    id:'proj-'+Date.now(),
+    company_id:activeCompanyId,
+    name:name.trim(),
+    description:(document.getElementById('np-desc')||{}).value||'',
+    status:'active',
+    start_date:(document.getElementById('np-start')||{}).value||null,
+    end_date:(document.getElementById('np-end')||{}).value||null,
+    created_by:currentUser.username,
+    created_at:new Date().toISOString(),
+    updated_at:new Date().toISOString(),
+  };
+  if(CONFIGURED){
+    try{ await sb.insert('projects',project); }
+    catch(e){ toast('Save failed: '+e.message,'err'); return; }
+  }
+  allProjects.unshift(project);
+  closeModal();
+  toast('Project "'+project.name+'" created','ok');
+  renderProjects();
+}
+
+function openEditProject(id){
+  const p=allProjects.find(p=>p.id===id);
+  if(!p)return;
+  openModal(`
+    <div class="modal-ttl">✏ Edit Project</div>
+    <div class="fgrid">
+      <div class="fg" style="grid-column:1/-1;"><div class="fl">Project Name <span class="req">REQUIRED</span></div><input class="fi" id="ep-name" value="${p.name||''}"></div>
+      <div class="fg" style="grid-column:1/-1;"><div class="fl">Description</div><textarea class="fi" id="ep-desc" rows="2" style="resize:vertical;">${p.description||''}</textarea></div>
+      <div class="fg"><div class="fl">Start Date</div><input class="fi" type="date" id="ep-start" value="${p.start_date||''}"></div>
+      <div class="fg"><div class="fl">End Date</div><input class="fi" type="date" id="ep-end" value="${p.end_date||''}"></div>
+      <div class="fg"><div class="fl">Status</div>
+        <select class="fi" id="ep-status">
+          <option value="active" ${p.status==='active'?'selected':''}>Active</option>
+          <option value="completed" ${p.status==='completed'?'selected':''}>Completed</option>
+          <option value="archived" ${p.status==='archived'?'selected':''}>Archived</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="act-btn btn-s" onclick="closeModal()">Cancel</button>
+      <button class="act-btn btn-p" onclick="saveEditProject('${p.id}')">Save Changes</button>
+    </div>
+  `);
+}
+
+async function saveEditProject(id){
+  const p=allProjects.find(p=>p.id===id);
+  if(!p)return;
+  const name=(document.getElementById('ep-name')||{}).value||'';
+  if(!name.trim()){toast('Project name is required','err');return;}
+  const updates={
+    name:name.trim(),
+    description:(document.getElementById('ep-desc')||{}).value||'',
+    status:(document.getElementById('ep-status')||{}).value||'active',
+    start_date:(document.getElementById('ep-start')||{}).value||null,
+    end_date:(document.getElementById('ep-end')||{}).value||null,
+    updated_at:new Date().toISOString(),
+  };
+  if(CONFIGURED){
+    try{ await sb.update('projects',id,updates); }
+    catch(e){ toast('Update failed: '+e.message,'err'); return; }
+  }
+  Object.assign(p,updates);
+  closeModal();
+  toast('Project updated','ok');
+  renderProjects();
+}
+
+async function setProjectStatus(id,status){
+  const p=allProjects.find(p=>p.id===id);
+  if(!p)return;
+  const label={completed:'mark as Completed',archived:'archive'}[status]||status;
+  if(!confirm('Are you sure you want to '+label+' "'+p.name+'"?'))return;
+  const updates={status,updated_at:new Date().toISOString()};
+  if(CONFIGURED){
+    try{ await sb.update('projects',id,updates); }
+    catch(e){ toast('Update failed: '+e.message,'err'); return; }
+  }
+  Object.assign(p,updates);
+  toast('Project '+status,'ok');
+  renderProjects();
+}
+
+function openAssignProject(projectId){
+  const p=allProjects.find(p=>p.id===projectId);
+  if(!p)return;
+  const fieldUsers=allUsers.filter(u=>['field','auditor'].includes(u.role)&&u.active!==false&&(!u.company_id||u.company_id===activeCompanyId));
+  const assigned=new Set(allAssignments.filter(a=>a.project_id===projectId).map(a=>a.user_id));
+  const userRows=fieldUsers.length
+    ?fieldUsers.map(u=>`
+      <label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;background:${assigned.has(u.id)?'rgba(0,119,204,.08)':'var(--surf2)'};margin-bottom:6px;">
+        <input type="checkbox" ${assigned.has(u.id)?'checked':''} data-uid="${u.id}" style="accent-color:var(--acc);width:15px;height:15px;">
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--text);">${u.name||u.username}</div>
+          <div style="font-size:10px;color:var(--text3);">${u.username} &middot; ${u.role}</div>
+        </div>
+      </label>`).join('')
+    :'<div style="color:var(--text3);font-size:12px;padding:12px 0;">No field users found for this company.</div>';
+
+  openModal(`
+    <div class="modal-ttl">👥 Assign Agents — ${p.name}</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Select field agents and auditors to assign to this project. They will see this project in the Field App at login.</div>
+    <div id="assign-user-list" style="max-height:320px;overflow-y:auto;">${userRows}</div>
+    <div class="modal-acts">
+      <button class="act-btn btn-s" onclick="closeModal()">Cancel</button>
+      <button class="act-btn btn-p" onclick="saveProjectAssignments('${projectId}')">Save Assignments</button>
+    </div>
+  `);
+}
+
+async function saveProjectAssignments(projectId){
+  const checkboxes=[...document.querySelectorAll('#assign-user-list input[type=checkbox]')];
+  const nowSelected=new Set(checkboxes.filter(c=>c.checked).map(c=>c.dataset.uid));
+  const existing=allAssignments.filter(a=>a.project_id===projectId);
+  const existingSet=new Set(existing.map(a=>a.user_id));
+
+  // Add new assignments
+  const toAdd=[...nowSelected].filter(uid=>!existingSet.has(uid));
+  // Remove unselected
+  const toRemove=existing.filter(a=>!nowSelected.has(a.user_id));
+
+  try{
+    for(const uid of toAdd){
+      const asgn={
+        project_id:projectId,
+        user_id:uid,
+        company_id:activeCompanyId,
+        assigned_by:currentUser.username,
+        assigned_at:new Date().toISOString(),
+      };
+      if(CONFIGURED) await sb.insert('project_assignments',asgn);
+      allAssignments.push({...asgn, id:'pa-'+Date.now()+'-'+uid});
+    }
+    for(const a of toRemove){
+      if(CONFIGURED) await fetch(`${SUPABASE_URL}/rest/v1/project_assignments?id=eq.${a.id}`,{
+        method:'DELETE',
+        headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}
+      });
+      const idx=allAssignments.findIndex(x=>x.id===a.id);
+      if(idx>=0)allAssignments.splice(idx,1);
+    }
+    closeModal();
+    toast(`Assignments saved for "${allProjects.find(p=>p.id===projectId)?.name||'project'}"`, 'ok');
+    renderProjects();
+  }catch(e){
+    toast('Assignment save failed: '+e.message,'err');
+  }
+}
+
+function filterAssetsByProject(projectId){
+  show('assets');
+  const sel=document.getElementById('ast-project');
+  if(sel){ sel.value=projectId; renderAssets(); }
 }
 
 // ══════════════════════════════════════════════════════
