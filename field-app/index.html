@@ -460,6 +460,14 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
     <input class="ls-inp" type="text" id="ls-user" placeholder="e.g. field.officer" autocapitalize="none">
   </div>
   <div class="ls-field">
+    <div class="ls-lbl">Password</div>
+    <input class="ls-inp" type="password" id="ls-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
+  </div>
+  <button class="ls-btn" onclick="doLogin()">Sign In →</button>
+  <div class="ls-err" id="ls-err"></div>
+  <div class="gps-stamp" id="login-gps-stamp"></div>
+  <div class="ls-role">Admin? <a href="admin.html">Go to Admin Portal →</a></div>
+</div>
 
 <!-- Project Selector Screen — shown between login and home when user has multiple projects -->
 <div id="project-selector-screen" style="display:none;flex-direction:column;align-items:center;justify-content:flex-start;min-height:100vh;padding:32px 16px;background:var(--bg);">
@@ -468,14 +476,6 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
   <div id="proj-sel-welcome" style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:20px;text-align:center;"></div>
   <div id="proj-sel-list" style="width:100%;max-width:420px;"></div>
   <button class="ls-btn" style="margin-top:24px;background:transparent;border:2px solid var(--border);color:var(--text2);max-width:420px;" onclick="doLogout()">← Log Out</button>
-</div>
-    <div class="ls-lbl">Password</div>
-    <input class="ls-inp" type="password" id="ls-pass" placeholder="Enter password" onkeydown="if(event.key==='Enter')doLogin()">
-  </div>
-  <button class="ls-btn" onclick="doLogin()">Sign In →</button>
-  <div class="ls-err" id="ls-err"></div>
-  <div class="gps-stamp" id="login-gps-stamp"></div>
-  <div class="ls-role">Admin? <a href="admin.html">Go to Admin Portal →</a></div>
 </div>
 
 <!-- ── Tenant Lockout Screen ─────────────────────────────── -->
@@ -1047,11 +1047,11 @@ async function checkTenantAccessAtLogin(user){
       const assignRes=await sb.query('project_assignments',`?user_id=eq.${user.id}&select=project_id`);
       if(Array.isArray(assignRes)&&assignRes.length){
         const projIds=assignRes.map(a=>a.project_id);
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=*`);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy`);
         userProjects=Array.isArray(allProjRes)?allProjRes.filter(p=>projIds.includes(p.id)):[];
       } else {
         // No assignments — fetch all active projects for this company (admin/auditor fallback)
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=*`);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy`);
         userProjects=Array.isArray(allProjRes)?allProjRes:[];
       }
     }catch(e){ userProjects=[]; }
@@ -1278,6 +1278,9 @@ function doLogout(){
   if(banner){banner.style.display='none';banner.style.borderColor='';}
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('main-app').style.display='none';
+  // Hide project selector if it was showing
+  const projSel=document.getElementById('project-selector-screen');
+  if(projSel) projSel.style.display='none';
   document.getElementById('ls-pass').value='';
   document.getElementById('ls-err').textContent='';
   const gpsEl=document.getElementById('login-gps-stamp');
@@ -1505,19 +1508,33 @@ function showConfigNotice(){
 function buildDropdowns(){
   const catSel=document.getElementById('f-cat');
   catSel.innerHTML='<option value="">Select category…</option>';
-  Object.keys(TAXONOMY).forEach(c=>catSel.innerHTML+=`<option>${c}</option>`);
+
+  // Use project taxonomy if active project has one, otherwise fall back to company TAXONOMY
+  const activeTax=getActiveProjectTaxonomy();
+  Object.keys(activeTax).forEach(c=>catSel.innerHTML+=`<option>${c}</option>`);
+
   // Filter locations by user's assigned_locations (empty = all allowed)
   const allowedLocs=getAssignedLocations();
   const visibleLocs=allowedLocs.length?LOCATIONS.filter(l=>allowedLocs.includes(l)):LOCATIONS;
   const locSel=document.getElementById('f-loc');
   locSel.innerHTML='<option value="">Select location…</option>';
   visibleLocs.forEach(l=>locSel.innerHTML+=`<option>${l}</option>`);
-  // Departments — no restriction
+  // Departments
   const deptSel=document.getElementById('f-dept');
   deptSel.innerHTML='<option value="">Select department…</option>';
   DEPARTMENTS.forEach(d=>deptSel.innerHTML+=`<option>${d}</option>`);
-  // Status & Condition — dynamic from config
   buildStatusConditionDropdowns();
+}
+
+// Returns the taxonomy to use for dropdowns — project-specific if available, else company TAXONOMY
+function getActiveProjectTaxonomy(){
+  if(currentProjectId && userProjects.length){
+    const proj=userProjects.find(p=>p.id===currentProjectId);
+    if(proj && proj.taxonomy && Object.keys(proj.taxonomy).length>0){
+      return proj.taxonomy;
+    }
+  }
+  return TAXONOMY;
 }
 
 // Populate all status and condition dropdowns from the loaded arrays.
@@ -1571,7 +1588,8 @@ function onCat(){
   nm.innerHTML='<option value="">Select sub-category first…</option>';
   sub.disabled=true;nm.disabled=true;
   if(!cat)return;
-  Object.keys(TAXONOMY[cat]||{}).forEach(s=>sub.innerHTML+=`<option>${s}</option>`);
+  const activeTax=getActiveProjectTaxonomy();
+  Object.keys(activeTax[cat]||{}).forEach(s=>sub.innerHTML+=`<option>${s}</option>`);
   sub.disabled=false;
 }
 function onSubcat(){
@@ -1581,7 +1599,8 @@ function onSubcat(){
   nm.innerHTML='<option value="">Select asset name…</option>';
   nm.disabled=true;
   if(!cat||!sub)return;
-  (TAXONOMY[cat][sub]||[]).forEach(n=>nm.innerHTML+=`<option>${n}</option>`);
+  const activeTax=getActiveProjectTaxonomy();
+  (activeTax[cat]&&activeTax[cat][sub]||[]).forEach(n=>nm.innerHTML+=`<option>${n}</option>`);
   nm.disabled=false;
 }
 
