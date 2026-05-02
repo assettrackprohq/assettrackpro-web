@@ -500,7 +500,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <div class="panel-hdr">
         <div><div class="panel-ttl">Companies & Workspaces</div>
         <div class="panel-sub">Each company has its own isolated config, users, and asset register</div></div>
-        <button class="act-btn btn-p" onclick="openAddCompany()">+ Add Company</button>
+        <button class="act-btn btn-p" onclick="openAddCompany()" data-superowner-only>+ Add Company</button>
       </div>
 
       <!-- Architecture explainer -->
@@ -1057,6 +1057,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           <div class="fg"><div class="fl">Barcode (contains)</div><input class="fi" type="text" id="rpt-barcode" placeholder="e.g. JAG001…"></div>
           <div class="fg"><div class="fl">Location</div><select class="fi" id="rpt-loc"><option value="">All Locations</option></select></div>
           <div class="fg"><div class="fl">Department</div><select class="fi" id="rpt-dept"><option value="">All Departments</option></select></div>
+          <div class="fg"><div class="fl">Project</div><select class="fi" id="rpt-project"><option value="">All Projects</option></select></div>
         </div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-s act-btn" onclick="populateReportFilterDropdowns()">🔄 Refresh Lists</button>
@@ -2437,6 +2438,10 @@ function renderCompanies(){
 
 // ── Add / Edit company modal ──
 function openAddCompany(){
+  if(currentUser && currentUser.role !== 'super_owner'){
+    toast('Only Super Owner can create companies or tenants','err');
+    return;
+  }
   const industryOpts=[...Object.keys(INDUSTRY_TEMPLATES),'Oil & Gas','Education','Government','Financial Services','Hospitality','Logistics','Real Estate','Telecommunications','NGO','Other'].map(i=>`<option>${i}</option>`).join('');
   openModal(`<div class="modal-ttl">Add Company / Workspace</div>
 
@@ -4494,6 +4499,7 @@ function getFilteredForExport(){
   const bc=((document.getElementById('rpt-barcode')||{}).value||'').trim().toLowerCase();
   const loc=(document.getElementById('rpt-loc')||{}).value||'';
   const dept=(document.getElementById('rpt-dept')||{}).value||'';
+  const proj=(document.getElementById('rpt-project')||{}).value||'';
   const wsAssets=activeCompanyId?allAssets.filter(a=>a.company_id===activeCompanyId||!a.company_id):allAssets;
   return wsAssets.filter(a=>{
     if(st&&a.status!==st)return false;
@@ -4502,6 +4508,7 @@ function getFilteredForExport(){
     if(bc&&!(a.barcode||'').toLowerCase().includes(bc))return false;
     if(loc&&a.location!==loc)return false;
     if(dept&&a.department!==dept)return false;
+    if(proj&&(a.project_id||'')!==proj)return false;
     return true;
   });
 }
@@ -4512,13 +4519,15 @@ function populateReportFilterDropdowns(){
   const depts=[...new Set(wsAssets.map(a=>a.department).filter(Boolean))].sort();
   const locEl=document.getElementById('rpt-loc');
   const deptEl=document.getElementById('rpt-dept');
+  const projEl=document.getElementById('rpt-project');
   if(locEl){locEl.innerHTML='<option value="">All Locations</option>'+locs.map(l=>`<option value="${l}">${l}</option>`).join('');}
   if(deptEl){deptEl.innerHTML='<option value="">All Departments</option>'+depts.map(d=>`<option value="${d}">${d}</option>`).join('');}
+  if(projEl){projEl.innerHTML='<option value="">All Projects</option>'+allProjects.filter(p=>p.status!=='archived').map(p=>`<option value="${p.id}">${p.name}</option>`).join('');}
 }
 
 function clearReportFilters(){
   ['rpt-from','rpt-to','rpt-barcode'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['rpt-status','rpt-loc','rpt-dept'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['rpt-status','rpt-loc','rpt-dept','rpt-project'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   toast('Filters cleared','ok');
 }
 
@@ -7113,12 +7122,20 @@ function renderProjects(){
     const assetCount=allAssets.filter(a=>a.project_id===p.id).length;
     const statusColor={active:'var(--acc4)',completed:'var(--acc)',archived:'var(--text3)'}[p.status]||'var(--text3)';
     const statusBg={active:'rgba(0,153,107,.1)',completed:'rgba(0,119,204,.1)',archived:'rgba(150,150,150,.1)'}[p.status]||'';
+    const tax=p.taxonomy;
+    const catCount=tax?Object.keys(tax).length:0;
+    const taxBadge=p.industry_template
+      ?`<span style="font-size:9px;padding:2px 8px;border-radius:5px;background:rgba(110,62,196,.12);color:var(--acc5);font-weight:700;margin-left:4px;">🏷 ${p.industry_template} · ${catCount} categories</span>`
+      :(catCount?`<span style="font-size:9px;padding:2px 8px;border-radius:5px;background:rgba(0,119,204,.1);color:var(--acc);font-weight:700;margin-left:4px;">🏷 Custom · ${catCount} categories</span>`
+      :`<span style="font-size:9px;padding:2px 8px;border-radius:5px;background:rgba(150,150,150,.1);color:var(--text3);font-weight:700;margin-left:4px;">🏷 Company taxonomy</span>`);
+    const canDelete = assetCount===0 && p.status!=='completed';
     return `<div style="background:var(--surf);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:12px;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
         <div style="flex:1;min-width:200px;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap;">
             <span style="font-family:var(--fh);font-size:14px;font-weight:900;color:var(--text);">${p.name}</span>
             <span style="font-size:9px;padding:3px 8px;border-radius:5px;font-weight:800;letter-spacing:.6px;background:${statusBg};color:${statusColor};">${p.status.toUpperCase()}</span>
+            ${taxBadge}
           </div>
           ${p.description?`<div style="font-size:11px;color:var(--text3);margin-bottom:8px;">${p.description}</div>`:''}
           <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -7133,6 +7150,7 @@ function renderProjects(){
           <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="filterAssetsByProject('${p.id}')">📦 Assets</button>
           ${p.status==='active'?`<button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;opacity:.7;" onclick="setProjectStatus('${p.id}','completed')">✅ Complete</button>`:''}
           ${p.status!=='archived'?`<button class="act-btn btn-d" style="padding:5px 10px;font-size:10px;" onclick="setProjectStatus('${p.id}','archived')">🗄 Archive</button>`:''}
+          ${canDelete?`<button class="act-btn btn-d" style="padding:5px 10px;font-size:10px;background:rgba(214,48,64,.15);color:var(--acc3);" onclick="deleteProject('${p.id}','${p.name.replace(/'/g,"\\'")}')">🗑 Delete</button>`:''}
         </div>
       </div>
     </div>`;
@@ -7187,6 +7205,9 @@ function previewProjectTaxonomy(){
 async function saveNewProject(){
   const name=(document.getElementById('np-name')||{}).value||'';
   if(!name.trim()){toast('Project name is required','err');return;}
+  const startDate=(document.getElementById('np-start')||{}).value||null;
+  const endDate=(document.getElementById('np-end')||{}).value||null;
+  if(startDate&&endDate&&startDate>endDate){toast('Start date cannot be later than end date','err');return;}
   const tmpl=(document.getElementById('np-industry')||{}).value||'';
   const taxonomy=tmpl?JSON.parse(JSON.stringify(INDUSTRY_TEMPLATES[tmpl]||INDUSTRY_TEMPLATES['General'])):null;
   const project={
@@ -7303,12 +7324,15 @@ async function saveEditProject(id){
   if(!p)return;
   const name=(document.getElementById('ep-name')||{}).value||'';
   if(!name.trim()){toast('Project name is required','err');return;}
+  const startDate=(document.getElementById('ep-start')||{}).value||null;
+  const endDate=(document.getElementById('ep-end')||{}).value||null;
+  if(startDate&&endDate&&startDate>endDate){toast('Start date cannot be later than end date','err');return;}
   const updates={
     name:name.trim(),
     description:(document.getElementById('ep-desc')||{}).value||'',
     status:(document.getElementById('ep-status')||{}).value||'active',
-    start_date:(document.getElementById('ep-start')||{}).value||null,
-    end_date:(document.getElementById('ep-end')||{}).value||null,
+    start_date:startDate,
+    end_date:endDate,
     taxonomy:p.taxonomy||null,
     industry_template:p.industry_template||null,
     updated_at:new Date().toISOString(),
@@ -7320,6 +7344,22 @@ async function saveEditProject(id){
   Object.assign(p,updates);
   closeModal();
   toast('Project updated','ok');
+  renderProjects();
+}
+
+async function deleteProject(id, name){
+  const assetCount=allAssets.filter(a=>a.project_id===id).length;
+  if(assetCount>0){toast(`Cannot delete — ${assetCount} asset${assetCount>1?'s are':' is'} recorded against this project`,'err');return;}
+  if(!confirm(`Delete project "${name}"? This cannot be undone.`))return;
+  if(CONFIGURED){
+    try{
+      await fetch(`${SUPABASE_URL}/rest/v1/project_assignments?project_id=eq.${id}`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}});
+      await fetch(`${SUPABASE_URL}/rest/v1/projects?id=eq.${id}`,{method:'DELETE',headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}});
+    }catch(e){toast('Delete failed: '+e.message,'err');return;}
+  }
+  allProjects.splice(allProjects.findIndex(p=>p.id===id),1);
+  allAssignments=allAssignments.filter(a=>a.project_id!==id);
+  toast(`Project "${name}" deleted`,'ok');
   renderProjects();
 }
 
