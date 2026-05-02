@@ -1206,18 +1206,15 @@ async function commitFirstLoginPassword(){
 }
 
 function completeLogin(){
-  // ── Project selector intercept ──────────────────────────────────
-  if(userProjects.length===0){
-    // No projects assigned — proceed with no project context
+  const activeProjects=userProjects.filter(p=>p.status==='active');
+  if(activeProjects.length===0){
     currentProjectId=null; currentProjectName=null;
     goToApp();
-  } else if(userProjects.length===1){
-    // Exactly one project — auto-select silently
-    currentProjectId=userProjects[0].id;
-    currentProjectName=userProjects[0].name;
+  } else if(activeProjects.length===1){
+    currentProjectId=activeProjects[0].id;
+    currentProjectName=activeProjects[0].name;
     goToApp();
   } else {
-    // Multiple projects — show selector screen
     showProjectSelector();
   }
 }
@@ -1229,14 +1226,20 @@ function showProjectSelector(){
   const welcome=document.getElementById('proj-sel-welcome');
   if(welcome) welcome.textContent='Welcome, '+(currentUser.name||currentUser.username)+'! Choose a project to work on:';
   const list=document.getElementById('proj-sel-list');
+  // Only show active projects — exclude completed and archived
+  const activeProjects=userProjects.filter(p=>p.status==='active');
   if(list){
-    list.innerHTML=userProjects.map(p=>`
-      <button onclick="selectProjectAndGo('${p.id}','${p.name.replace(/'/g,"\\'")}')"
-        style="display:block;width:100%;text-align:left;padding:16px 18px;background:var(--surf);border:1.5px solid var(--border);border-radius:12px;margin-bottom:10px;cursor:pointer;transition:border-color .15s;">
-        <div style="font-family:var(--fh);font-size:14px;font-weight:900;color:var(--acc);margin-bottom:4px;">📁 ${p.name}</div>
-        ${p.description?`<div style="font-size:11px;color:var(--text3);">${p.description}</div>`:''}
-        ${p.start_date?`<div style="font-size:10px;color:var(--text3);margin-top:4px;">📅 ${p.start_date}${p.end_date?' → '+p.end_date:''}</div>`:''}
-      </button>`).join('');
+    if(!activeProjects.length){
+      list.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px;">No active projects assigned to you.<br>Contact your administrator.</div>`;
+    } else {
+      list.innerHTML=activeProjects.map(p=>`
+        <button onclick="selectProjectAndGo('${p.id}','${p.name.replace(/'/g,"\\'")}')"
+          style="display:block;width:100%;text-align:left;padding:16px 18px;background:var(--surf);border:1.5px solid var(--border);border-radius:12px;margin-bottom:10px;cursor:pointer;">
+          <div style="font-family:var(--fh);font-size:14px;font-weight:900;color:var(--acc);margin-bottom:4px;">📁 ${p.name}</div>
+          ${p.description?`<div style="font-size:11px;color:var(--text3);">${p.description}</div>`:''}
+          ${p.start_date?`<div style="font-size:10px;color:var(--text3);margin-top:4px;">📅 ${p.start_date}${p.end_date?' → '+p.end_date:''}</div>`:''}
+        </button>`).join('');
+    }
   }
 }
 
