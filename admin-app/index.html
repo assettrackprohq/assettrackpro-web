@@ -5720,7 +5720,13 @@ function copySQL(){
 // ══════════════════════════════════════════════════════
 // MODAL
 // ══════════════════════════════════════════════════════
-function openModal(html){document.getElementById('modal-body').innerHTML=html;document.getElementById('modal-overlay').classList.add('open');}
+function openModal(html,opts={}){
+  const body=document.getElementById('modal-body');
+  const box=document.getElementById('modal-box')||body.parentElement;
+  if(box){box.style.maxWidth=opts.wide?'760px':'520px';}
+  body.innerHTML=html;
+  document.getElementById('modal-overlay').classList.add('open');
+}
 function closeModal(){document.getElementById('modal-overlay').classList.remove('open');}
 document.addEventListener('DOMContentLoaded',function(){
   const mo=document.getElementById('modal-overlay');
@@ -7237,37 +7243,20 @@ async function saveNewProject(){
 function openEditProject(id){
   const p=allProjects.find(p=>p.id===id);
   if(!p)return;
-  const tax=p.taxonomy||null;
-  const cats=tax?Object.keys(tax):[];
   const industryOpts=['— No template —',...Object.keys(INDUSTRY_TEMPLATES)]
     .map(i=>`<option value="${i==='— No template —'?'':i}" ${(p.industry_template||'')===(i==='— No template —'?'':i)?'selected':''}>${i}</option>`).join('');
-
-  const taxEditor=tax?`
-    <div class="fg" style="grid-column:1/-1;">
-      <div class="fl">Project Categories <span style="font-size:10px;font-weight:600;color:var(--text3);">(${cats.length} loaded from ${p.industry_template||'custom'})</span></div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;" id="ep-cat-tags">
-        ${cats.map(c=>`
-          <span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:4px 10px;background:rgba(0,119,204,.1);color:var(--acc);border-radius:6px;font-weight:700;">
-            ${c}
-            <button onclick="removeProjCat('${id}','${c.replace(/'/g,"\\'")}')" style="background:none;border:none;color:var(--acc3);cursor:pointer;font-size:11px;padding:0;line-height:1;">✕</button>
-          </span>`).join('')}
-      </div>
-      <div style="display:flex;gap:8px;">
-        <input class="fi" id="ep-new-cat" placeholder="Add category…" style="flex:1;" onkeydown="if(event.key==='Enter')addProjCat('${id}')">
-        <button class="act-btn btn-s" onclick="addProjCat('${id}')" style="padding:8px 14px;white-space:nowrap;">+ Add</button>
-      </div>
-    </div>`:`
-    <div class="fg" style="grid-column:1/-1;">
-      <div class="fl">Industry Template</div>
-      <select class="fi" id="ep-industry" onchange="applyTemplateToProject('${id}')">${industryOpts}</select>
-      <div style="font-size:10px;color:var(--text3);margin-top:4px;">Selecting a template will load its categories into this project.</div>
-    </div>`;
-
+  const tax=p.taxonomy||null;
+  const catCount=tax?Object.keys(tax).length:0;
+  const taxSummary=p.industry_template
+    ?`<span style="color:var(--acc5);font-weight:700;">${p.industry_template}</span> · ${catCount} categories`
+    :(catCount?`Custom · ${catCount} categories`:`Using company master taxonomy`);
   openModal(`
     <div class="modal-ttl">✏ Edit Project</div>
     <div class="fgrid">
-      <div class="fg" style="grid-column:1/-1;"><div class="fl">Project Name <span class="req">REQUIRED</span></div><input class="fi" id="ep-name" value="${p.name||''}"></div>
-      <div class="fg" style="grid-column:1/-1;"><div class="fl">Description</div><textarea class="fi" id="ep-desc" rows="2" style="resize:vertical;">${p.description||''}</textarea></div>
+      <div class="fg" style="grid-column:1/-1;"><div class="fl">Project Name <span class="req">REQUIRED</span></div>
+        <input class="fi" id="ep-name" value="${p.name||''}"></div>
+      <div class="fg" style="grid-column:1/-1;"><div class="fl">Description</div>
+        <textarea class="fi" id="ep-desc" rows="2" style="resize:vertical;">${p.description||''}</textarea></div>
       <div class="fg"><div class="fl">Start Date</div><input class="fi" type="date" id="ep-start" value="${p.start_date||''}"></div>
       <div class="fg"><div class="fl">End Date</div><input class="fi" type="date" id="ep-end" value="${p.end_date||''}"></div>
       <div class="fg"><div class="fl">Status</div>
@@ -7275,36 +7264,274 @@ function openEditProject(id){
           <option value="active" ${p.status==='active'?'selected':''}>Active</option>
           <option value="completed" ${p.status==='completed'?'selected':''}>Completed</option>
           <option value="archived" ${p.status==='archived'?'selected':''}>Archived</option>
-        </select>
+        </select></div>
+      <div class="fg" style="grid-column:1/-1;">
+        <div class="fl">Industry Template</div>
+        <select class="fi" id="ep-industry" onchange="applyTemplateToProject('${id}')">${industryOpts}</select>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px;">Changing template replaces the current taxonomy — customisations will be lost.</div>
       </div>
-      ${taxEditor}
+      <div class="fg" style="grid-column:1/-1;">
+        <div class="fl">Project Taxonomy</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">
+          <div style="font-size:12px;color:var(--text2);">${taxSummary}</div>
+          <button class="act-btn btn-s" style="padding:6px 14px;font-size:11px;white-space:nowrap;" onclick="closeModal();openTaxonomyEditor('${id}')">📝 Edit Taxonomy</button>
+        </div>
+      </div>
     </div>
     <div class="modal-acts">
       <button class="act-btn btn-s" onclick="closeModal()">Cancel</button>
-      <button class="act-btn btn-p" onclick="saveEditProject('${p.id}')">Save Changes</button>
+      <button class="act-btn btn-p" onclick="saveEditProject('${id}')">Save Changes</button>
     </div>
   `);
 }
 
-function removeProjCat(projId, cat){
-  const p=allProjects.find(p=>p.id===projId);
-  if(!p||!p.taxonomy)return;
-  delete p.taxonomy[cat];
-  openEditProject(projId); // re-render modal with updated categories
-}
+// ══════════════════════════════════════════════════════
+// THREE-LEVEL TAXONOMY EDITOR
+// ══════════════════════════════════════════════════════
 
-function addProjCat(projId){
+// State for in-progress taxonomy edits
+let _taxEditId = null;  // current project id being edited
+let _taxDraft  = null;  // deep copy of taxonomy being edited
+
+function openTaxonomyEditor(projId){
   const p=allProjects.find(p=>p.id===projId);
   if(!p)return;
-  const inp=document.getElementById('ep-new-cat');
+  _taxEditId=projId;
+  _taxDraft=p.taxonomy?JSON.parse(JSON.stringify(p.taxonomy)):{};
+  renderTaxonomyEditor();
+}
+
+function renderTaxonomyEditor(){
+  const p=allProjects.find(p=>p.id===_taxEditId);
+  if(!p)return;
+  const cats=Object.keys(_taxDraft);
+
+  const catRows=cats.length?cats.map(cat=>{
+    const subs=Object.keys(_taxDraft[cat]||{});
+    const subRows=subs.map(sub=>{
+      const items=(_taxDraft[cat][sub]||[]);
+      const itemChips=items.map((nm,i)=>`
+        <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:3px 8px;background:var(--surf3);color:var(--text2);border-radius:5px;border:1px solid var(--border);">
+          ${nm}
+          <button onclick="_taxRemoveItem('${esc(cat)}','${esc(sub)}',${i})" style="background:none;border:none;color:var(--acc3);cursor:pointer;font-size:10px;padding:0;">✕</button>
+        </span>`).join('');
+      return `
+        <div style="margin-left:18px;margin-bottom:10px;border-left:2px solid var(--border);padding-left:12px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+            <span style="font-size:11px;font-weight:700;color:var(--text);">↳ ${sub}</span>
+            <button onclick="_taxRemoveSub('${esc(cat)}','${esc(sub)}')" style="background:none;border:none;color:var(--acc3);cursor:pointer;font-size:10px;padding:0 2px;" title="Remove subcategory">✕</button>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">${itemChips||'<span style="font-size:10px;color:var(--text3);font-style:italic;">No asset names yet</span>'}</div>
+          <div style="display:flex;gap:6px;">
+            <input class="fi" id="tax-item-${esc(cat)}-${esc(sub)}" placeholder="Add asset name…" style="flex:1;padding:5px 8px;font-size:11px;" onkeydown="if(event.key==='Enter')_taxAddItem('${esc(cat)}','${esc(sub)}')">
+            <button class="act-btn btn-s" onclick="_taxAddItem('${esc(cat)}','${esc(sub)}')" style="padding:5px 10px;font-size:10px;">+ Name</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div style="background:var(--surf);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-family:var(--fh);font-size:13px;font-weight:900;color:var(--acc);">📁 ${cat}</span>
+          <div style="display:flex;gap:6px;">
+            <button onclick="_taxRemoveCat('${esc(cat)}')" class="act-btn btn-d" style="padding:3px 8px;font-size:10px;">✕ Remove</button>
+          </div>
+        </div>
+        ${subRows}
+        <div style="display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
+          <input class="fi" id="tax-sub-${esc(cat)}" placeholder="Add subcategory to ${cat}…" style="flex:1;padding:5px 8px;font-size:11px;" onkeydown="if(event.key==='Enter')_taxAddSub('${esc(cat)}')">
+          <button class="act-btn btn-s" onclick="_taxAddSub('${esc(cat)}')" style="padding:5px 10px;font-size:10px;">+ Subcategory</button>
+        </div>
+      </div>`;
+  }).join('')
+  :`<div style="text-align:center;padding:24px;color:var(--text3);font-size:12px;">No categories yet — add one below or import from a file.</div>`;
+
+  openModal(`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+      <div>
+        <div class="modal-ttl" style="margin:0;">📝 Taxonomy Editor</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${p.name}</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button class="act-btn btn-s" style="padding:6px 12px;font-size:11px;" onclick="_taxImportOpen()">⬆ Import</button>
+        <button class="act-btn btn-s" style="padding:6px 12px;font-size:11px;" onclick="_taxDownloadTemplate()">⬇ Template</button>
+      </div>
+    </div>
+
+    <!-- Tab switcher -->
+    <div style="display:flex;gap:8px;margin-bottom:14px;" id="tax-tabs">
+      <button id="tax-tab-edit" onclick="_taxTab('edit')" style="flex:1;padding:8px;font-size:11px;font-weight:700;border-radius:8px;border:2px solid var(--acc);background:rgba(0,119,204,.1);color:var(--acc);cursor:pointer;">✏ Edit Tree</button>
+      <button id="tax-tab-import" onclick="_taxTab('import')" style="flex:1;padding:8px;font-size:11px;font-weight:700;border-radius:8px;border:2px solid var(--border);background:var(--surf2);color:var(--text2);cursor:pointer;">⬆ Import</button>
+    </div>
+
+    <!-- Edit tree panel -->
+    <div id="tax-panel-edit" style="max-height:55vh;overflow-y:auto;">
+      ${catRows}
+      <div style="display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:2px dashed var(--border);">
+        <input class="fi" id="tax-new-cat" placeholder="Add new category…" style="flex:1;" onkeydown="if(event.key==='Enter')_taxAddCat()">
+        <button class="act-btn btn-p" onclick="_taxAddCat()" style="padding:8px 14px;font-size:11px;white-space:nowrap;">+ Category</button>
+      </div>
+    </div>
+
+    <!-- Import panel -->
+    <div id="tax-panel-import" style="display:none;">
+      <div style="background:var(--surf2);border-radius:10px;padding:14px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.8;">
+        <strong style="color:var(--text);">CSV or Excel format:</strong><br>
+        Columns: <code style="color:var(--acc);">Category | Subcategory | Asset Name (optional)</code><br>
+        Example: <em>IT Equipment, Laptops, Dell XPS 15</em><br>
+        Rows with only Category + Subcategory add a subcategory without asset names.
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;margin-bottom:8px;">
+          <input type="radio" name="tax-imp-mode" value="merge" checked> Merge with existing
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;">
+          <input type="radio" name="tax-imp-mode" value="replace"> Replace entirely
+        </label>
+      </div>
+      <input type="file" id="tax-imp-file" accept=".csv,.xlsx,.xls" style="display:none;" onchange="_taxHandleImport(this)">
+      <button class="act-btn btn-p" onclick="document.getElementById('tax-imp-file').click()" style="width:100%;padding:14px;font-size:12px;">
+        📂 Select CSV or Excel File
+      </button>
+      <div id="tax-imp-result" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="modal-acts" style="margin-top:14px;">
+      <button class="act-btn btn-s" onclick="closeModal();openEditProject('${p.id}')">← Back</button>
+      <button class="act-btn btn-p" onclick="_taxSave()">✓ Save Taxonomy</button>
+    </div>
+  `,{wide:true});
+}
+
+// Escape single quotes for inline onclick attributes
+function esc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+function _taxTab(tab){
+  document.getElementById('tax-panel-edit').style.display=tab==='edit'?'':'none';
+  document.getElementById('tax-panel-import').style.display=tab==='import'?'':'none';
+  const editBtn=document.getElementById('tax-tab-edit');
+  const impBtn=document.getElementById('tax-tab-import');
+  if(editBtn){editBtn.style.border=tab==='edit'?'2px solid var(--acc)':'2px solid var(--border)';editBtn.style.background=tab==='edit'?'rgba(0,119,204,.1)':'var(--surf2)';editBtn.style.color=tab==='edit'?'var(--acc)':'var(--text2)';}
+  if(impBtn){impBtn.style.border=tab==='import'?'2px solid var(--acc)':'2px solid var(--border)';impBtn.style.background=tab==='import'?'rgba(0,119,204,.1)':'var(--surf2)';impBtn.style.color=tab==='import'?'var(--acc)':'var(--text2)';}
+}
+
+function _taxAddCat(){
+  const inp=document.getElementById('tax-new-cat');
   const nm=(inp?inp.value:'').trim();
-  if(!nm){toast('Enter a category name','err');return;}
-  if(!p.taxonomy) p.taxonomy={};
-  if(p.taxonomy[nm]){toast('Category already exists','err');return;}
-  // Seed from master taxonomy or template if available
-  const src=INDUSTRY_TEMPLATES[p.industry_template]||TAXONOMY;
-  p.taxonomy[nm]=src[nm]?JSON.parse(JSON.stringify(src[nm])):{};
-  openEditProject(projId); // re-render
+  if(!nm){toast('Enter category name','err');return;}
+  if(_taxDraft[nm]){toast('Category already exists','err');return;}
+  _taxDraft[nm]={};
+  renderTaxonomyEditor();
+}
+
+function _taxRemoveCat(cat){
+  if(!confirm(`Remove category "${cat}" and all its subcategories?`))return;
+  delete _taxDraft[cat];
+  renderTaxonomyEditor();
+}
+
+function _taxAddSub(cat){
+  const inp=document.getElementById('tax-sub-'+cat);
+  const nm=(inp?inp.value:'').trim();
+  if(!nm){toast('Enter subcategory name','err');return;}
+  if(!_taxDraft[cat])_taxDraft[cat]={};
+  if(_taxDraft[cat][nm]){toast('Subcategory already exists','err');return;}
+  _taxDraft[cat][nm]=[];
+  renderTaxonomyEditor();
+}
+
+function _taxRemoveSub(cat,sub){
+  if(!confirm(`Remove subcategory "${sub}"?`))return;
+  delete _taxDraft[cat][sub];
+  renderTaxonomyEditor();
+}
+
+function _taxAddItem(cat,sub){
+  const inp=document.getElementById('tax-item-'+cat+'-'+sub);
+  const nm=(inp?inp.value:'').trim();
+  if(!nm){toast('Enter asset name','err');return;}
+  if(!_taxDraft[cat])_taxDraft[cat]={};
+  if(!_taxDraft[cat][sub])_taxDraft[cat][sub]=[];
+  if(_taxDraft[cat][sub].includes(nm)){toast('Asset name already exists','err');return;}
+  _taxDraft[cat][sub].push(nm);
+  renderTaxonomyEditor();
+}
+
+function _taxRemoveItem(cat,sub,idx){
+  _taxDraft[cat][sub].splice(idx,1);
+  renderTaxonomyEditor();
+}
+
+async function _taxSave(){
+  const p=allProjects.find(p=>p.id===_taxEditId);
+  if(!p)return;
+  const catCount=Object.keys(_taxDraft).length;
+  p.taxonomy=JSON.parse(JSON.stringify(_taxDraft));
+  const updates={taxonomy:p.taxonomy,updated_at:new Date().toISOString()};
+  if(CONFIGURED){
+    try{ await sb.update('projects',_taxEditId,updates); }
+    catch(e){ toast('Save failed: '+e.message,'err'); return; }
+  }
+  Object.assign(p,updates);
+  renderProjects();
+  toast(`Taxonomy saved — ${catCount} categories`,'ok');
+  closeModal();
+  openEditProject(_taxEditId);
+}
+
+function _taxImportOpen(){ _taxTab('import'); }
+
+function _taxDownloadTemplate(){
+  const csv='Category,Subcategory,Asset Name (optional)\nIT Equipment,Laptops,Dell XPS 15\nIT Equipment,Laptops,HP EliteBook\nIT Equipment,Desktops,\nFurniture,Chairs,Executive Chair\n';
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
+  document.body.appendChild(a);a.href=url;a.download='ProjectTaxonomy_Template.csv';a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},300);
+  toast('Template downloaded','ok');
+}
+
+async function _taxHandleImport(input){
+  const file=input.files[0];if(!file)return;
+  const mode=document.querySelector('input[name="tax-imp-mode"]:checked')?.value||'merge';
+  const result=document.getElementById('tax-imp-result');
+  const ext=file.name.split('.').pop().toLowerCase();
+  let rows=[];
+  try{
+    if(ext==='csv'){
+      const text=await file.text();
+      rows=parseCSV(text);
+    } else {
+      const buf=await file.arrayBuffer();
+      const XLSX=await loadSheetJS();
+      const wb=XLSX.read(buf,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''}).filter(r=>r.some(c=>String(c).trim()));
+    }
+  }catch(e){toast('Could not read file: '+e.message,'err');input.value='';return;}
+
+  // Detect and skip header row
+  const dataRows=rows[0]&&/category/i.test(String(rows[0][0]))?rows.slice(1):rows;
+  if(mode==='replace') _taxDraft={};
+  let added=0, skipped=0;
+  dataRows.forEach(r=>{
+    const cat=String(r[0]||'').trim();
+    const sub=String(r[1]||'').trim();
+    const nm=String(r[2]||'').trim();
+    if(!cat){skipped++;return;}
+    if(!_taxDraft[cat])_taxDraft[cat]={};
+    if(!sub){added++;return;}
+    if(!_taxDraft[cat][sub])_taxDraft[cat][sub]=[];
+    if(!nm){added++;return;}
+    if(!_taxDraft[cat][sub].includes(nm)){_taxDraft[cat][sub].push(nm);added++;}
+    else skipped++;
+  });
+  input.value='';
+  if(result){
+    result.innerHTML=`<div style="background:rgba(0,200,160,.1);border:1px solid var(--acc4);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--text);">
+      ✅ Imported — <strong>${added}</strong> items added · <strong>${skipped}</strong> skipped (duplicates or blank)
+      <br><button class="act-btn btn-p" onclick="_taxTab('edit')" style="margin-top:8px;padding:5px 14px;font-size:11px;">← View Tree</button>
+    </div>`;
+  }
 }
 
 function applyTemplateToProject(projId){
