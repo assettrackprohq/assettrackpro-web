@@ -1044,17 +1044,19 @@ async function checkTenantAccessAtLogin(user){
     }catch(e){ currentCompanyAssetCount=0; }
     // Fetch projects assigned to this user
     try{
-      const assignRes=await sb.query('project_assignments',`?user_id=eq.${user.id}&select=project_id`);
+      const assignRes=await sb.query('project_assignments',`?user_id=eq.${user.id}&select=project_id,assigned_locations`);
       if(Array.isArray(assignRes)&&assignRes.length){
         const projIds=assignRes.map(a=>a.project_id);
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy`);
+        window._userProjLocs={};
+        assignRes.forEach(a=>{window._userProjLocs[a.project_id]=Array.isArray(a.assigned_locations)?a.assigned_locations:[];});
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations`);
         userProjects=Array.isArray(allProjRes)?allProjRes.filter(p=>projIds.includes(p.id)):[];
       } else {
-        // No assignments — fetch all active projects for this company (admin/auditor fallback)
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy`);
+        window._userProjLocs={};
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations`);
         userProjects=Array.isArray(allProjRes)?allProjRes:[];
       }
-    }catch(e){ userProjects=[]; }
+    }catch(e){ userProjects=[]; console.warn('projectFetch:',e.message); }
     // Show warning banner if near cap
     checkAndShowCapBanner();
   }catch(e){
@@ -1560,6 +1562,28 @@ function buildStatusConditionDropdowns(){
 // Return array of locations the current user is restricted to.
 // Empty array means unrestricted (all locations).
 function getAssignedLocations(){
+  // Priority order:
+  // 1. User's assigned_locations for the current project (most specific)
+  // 2. All project locations (if user has no specific location assignment)
+  // 3. User's company-wide assigned_locations (legacy fallback)
+  // 4. Empty = no restriction
+
+  if(currentProjectId){
+    const proj=userProjects.find(p=>p.id===currentProjectId);
+    const projLocs=Array.isArray(proj?.locations)?proj.locations:[];
+    const userProjLocs=(window._userProjLocs||{})[currentProjectId]||[];
+
+    if(userProjLocs.length>0){
+      // User has specific locations assigned for this project
+      return userProjLocs;
+    }
+    if(projLocs.length>0){
+      // No specific assignment but project has locations — show all project locations
+      return projLocs;
+    }
+  }
+
+  // Fallback — company-wide assigned_locations on user record
   if(!currentUser)return[];
   const al=currentUser.assigned_locations;
   if(!al)return[];
@@ -1792,7 +1816,6 @@ function persistHistory(asset, cloudSaved){
     const key='atp_history_'+uname;
     let hist=[];
     try{hist=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-    // Lightweight record — no photo blobs
     hist.unshift({
       id:asset.id, barcode:asset.barcode, name:asset.name,
       category:asset.category, sub_category:asset.sub_category,
@@ -1800,6 +1823,8 @@ function persistHistory(asset, cloudSaved){
       status:asset.status, condition:asset.condition,
       custodian:asset.custodian, serial:asset.serial,
       registered_by:asset.registered_by, company_id:asset.company_id,
+      project_id:asset.project_id||currentProjectId||null,
+      project_name:currentProjectName||null,
       created_at:asset.created_at, cloud:cloudSaved,
       approval_status:asset.approval_status||'pending',
       approval_comment:asset.approval_comment||null,
@@ -1889,34 +1914,48 @@ function _renderHistoryUI(){
     el.innerHTML='<div class="empty"><div class="empty-i">&#x1F4CB;</div><div class="empty-t">No captures yet</div><div class="empty-s">Every asset you register appears here permanently, even after logout.</div></div>';
     return;
   }
-  var rejected=hist.filter(function(a){return a.approval_status==='rejected';}).length;
-  var approved=hist.filter(function(a){return a.approval_status==='approved';}).length;
-  var pending=hist.filter(function(a){return !a.approval_status||a.approval_status==='pending';}).length;
-  var rows=hist.map(function(a){
+
+  // Build project map from history
+  var projMap={};
+  hist.forEach(function(a){ if(a.project_id&&a.project_name) projMap[a.project_id]=a.project_name; });
+  var showProjFilter=Object.keys(projMap).length>0;
+
+  // Get or set project filter — default to current project
+  var projFilter=document.getElementById('hist-proj-filter')?document.getElementById('hist-proj-filter').value:'';
+  if(!projFilter && currentProjectId && projMap[currentProjectId]) projFilter=currentProjectId;
+
+  // Apply filter
+  var filtered=projFilter&&projFilter!=='all'
+    ?hist.filter(function(a){ return (a.project_id||'none')===projFilter; })
+    :hist;
+
+  var rejected=filtered.filter(function(a){return a.approval_status==='rejected';}).length;
+  var approved=filtered.filter(function(a){return a.approval_status==='approved';}).length;
+  var pending=filtered.filter(function(a){return !a.approval_status||a.approval_status==='pending';}).length;
+
+  var rows=filtered.map(function(a){
     var apvS=a.approval_status||'pending';
     var bgColor=apvS==='approved'?'rgba(0,153,107,.07)':apvS==='rejected'?'rgba(214,48,64,.06)':'var(--surf2)';
     var borderColor=apvS==='approved'?'rgba(0,153,107,.22)':apvS==='rejected'?'rgba(214,48,64,.2)':'var(--border)';
     var pillLabel=apvS==='approved'?'&#x2705; Approved':apvS==='rejected'?'&#x274C; Rejected':'&#x1F550; Pending';
     var commentBlock=(apvS==='rejected'||apvS==='approved')&&a.approval_comment
-      ?'<div style="font-size:11px;color:'+(apvS==='rejected'?'var(--acc3)':'var(--acc4)')
-        +';margin-top:7px;padding:7px 10px;background:'+(apvS==='rejected'?'rgba(214,48,64,.06)':'rgba(0,153,107,.06)')
-        +';border-radius:7px;font-style:italic;line-height:1.45;">&#x1F4AC; <strong>'
-        +(apvS==='rejected'?'Rejection reason':'Note')+':</strong> '+a.approval_comment+'</div>':'';
+      ?'<div style="font-size:11px;color:'+(apvS==='rejected'?'var(--acc3)':'var(--acc4)')+';margin-top:7px;padding:7px 10px;background:'+(apvS==='rejected'?'rgba(214,48,64,.06)':'rgba(0,153,107,.06)')+';border-radius:7px;font-style:italic;line-height:1.45;">&#x1F4AC; <strong>'+(apvS==='rejected'?'Rejection reason':'Note')+':</strong> '+a.approval_comment+'</div>':'';
     var approvedByBlock=apvS==='approved'&&a.approved_by
-      ?'<div style="font-size:10px;color:var(--acc4);margin-top:5px;">&#x2713; Approved by <strong>'+a.approved_by+'</strong>'
-        +(a.approved_at?' &middot; '+new Date(a.approved_at).toLocaleDateString('en-GB'):'')+'</div>':'';
+      ?'<div style="font-size:10px;color:var(--acc4);margin-top:5px;">&#x2713; Approved by <strong>'+a.approved_by+'</strong>'+(a.approved_at?' &middot; '+new Date(a.approved_at).toLocaleDateString('en-GB'):'')+'</div>':'';
     var fixBtn=apvS==='rejected'
       ?'<button onclick="openResubmitAsset(\''+a.id+'\')" style="margin-top:8px;width:100%;background:var(--g-blue);color:#0a1e38;border:none;border-radius:8px;padding:7px;font-size:11px;font-weight:800;cursor:pointer;font-family:var(--fh);">&#x270F;&#xFE0F; Fix &amp; Resubmit &#x2192;</button>':'';
-    var gpsLine=a.capture_location
-      ?'<div style="font-size:9px;color:var(--text3);margin-top:3px;">&#x1F4CD; Captured at: '+a.capture_location+'</div>':'';
+    var gpsLine=a.capture_location?'<div style="font-size:9px;color:var(--text3);margin-top:3px;">&#x1F4CD; Captured at: '+a.capture_location+'</div>':'';
+    var projBadge=(!projFilter||projFilter==='all')&&a.project_name
+      ?'<div style="font-size:9px;color:var(--acc5);margin-top:2px;font-weight:700;">&#x1F4C1; '+a.project_name+'</div>':'';
     return '<div style="background:'+bgColor+';border:1px solid '+borderColor+';border-radius:12px;padding:12px 14px;margin-bottom:8px;">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
         +'<div style="flex:1;min-width:0;">'
           +'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+a.name+'</div>'
           +'<div style="font-size:10px;color:var(--acc);font-family:monospace;margin-top:1px;">&#x25A3; '+a.barcode+'</div>'
+          +projBadge
         +'</div>'
         +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">'
-          +'<span style="font-size:9px;padding:3px 8px;border-radius:5px;'+(a.cloud?'background:rgba(0,200,160,.12);color:var(--acc)':'background:rgba(255,160,0,.12);color:var(--acc2)')+'">'+(a.cloud?'&#x2601; Cloud':'&#x1F4BE; Local')+'</span>'
+          +'<span style="font-size:9px;padding:3px 8px;border-radius:5px;'+(a.cloud?'background:rgba(0,200,160,.12);color:var(--acc)':'background:rgba(255,160,0,.12);color:var(--acc2)')+'\">'+(a.cloud?'&#x2601; Cloud':'&#x1F4BE; Local')+'</span>'
           +'<span class="apv-pill apv-'+apvS+'">'+pillLabel+'</span>'
         +'</div>'
       +'</div>'
@@ -1925,21 +1964,33 @@ function _renderHistoryUI(){
         +'<div>&#x1F4C1; '+(a.category||'')+(a.sub_category?' &rsaquo; '+a.sub_category:'')+'</div>'
         +'<div>&#x1F464; '+(a.custodian||'&#x2014;')+'</div>'
       +'</div>'
-      +gpsLine
-      +commentBlock
-      +approvedByBlock
+      +gpsLine+commentBlock+approvedByBlock
       +'<div style="font-size:9px;color:var(--text3);margin-top:5px;">'+(a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'&#x2014;')+'</div>'
       +fixBtn
     +'</div>';
   }).join('');
+
+  // Project filter dropdown
+  var projOptions='<option value="all">All Projects ('+hist.length+')</option>';
+  Object.entries(projMap).forEach(function(e){
+    var cnt=hist.filter(function(a){return a.project_id===e[0];}).length;
+    projOptions+='<option value="'+e[0]+'" '+(projFilter===e[0]?'selected':'')+'>'+e[1]+' ('+cnt+')</option>';
+  });
+  if(hist.some(function(a){return !a.project_id;})){
+    var noCnt=hist.filter(function(a){return !a.project_id;}).length;
+    projOptions+='<option value="none" '+(projFilter==='none'?'selected':'')+'>No project ('+noCnt+')</option>';
+  }
+
   el.innerHTML=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
-      +'<div style="font-size:11px;color:var(--text2);">'+hist.length+' total &middot; '+hist.filter(function(a){return a.cloud;}).length+' &#x2601; synced</div>'
+      +'<div style="font-size:11px;color:var(--text2);">'+filtered.length+' of '+hist.length+' captures'+(filtered.length!==hist.length?' (filtered)':'')+'</div>'
       +'<div style="display:flex;gap:8px;">'
         +'<button onclick="exportHistoryCSV()" style="font-size:10px;background:var(--acc);border:none;border-radius:7px;padding:6px 12px;color:#0a1e38;font-weight:700;cursor:pointer;">&#x2B07; CSV</button>'
         +'<button onclick="if(confirm(\'Clear all history?\')){localStorage.removeItem(\'atp_history_\'+(currentUser?currentUser.username:\'unknown\'));renderHistory();updateSyncBadge();}" style="font-size:10px;background:var(--surf2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text3);cursor:pointer;">Clear</button>'
       +'</div>'
     +'</div>'
+    +(showProjFilter?'<select id="hist-proj-filter" onchange="_renderHistoryUI()" style="width:100%;padding:8px 10px;font-size:11px;border-radius:8px;border:1px solid var(--border);background:var(--surf2);color:var(--text);font-weight:700;margin-bottom:10px;">'+projOptions+'</select>':'')
+    +(currentProjectName&&projFilter===currentProjectId?'<div style="font-size:10px;font-weight:700;color:var(--acc5);background:rgba(110,62,196,.1);border-radius:8px;padding:6px 10px;margin-bottom:10px;">&#x1F4C1; '+currentProjectName+'</div>':'')
     +'<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">'
       +'<span class="apv-pill apv-pending">&#x1F550; '+pending+' Pending</span>'
       +'<span class="apv-pill apv-approved">&#x2705; '+approved+' Approved</span>'
