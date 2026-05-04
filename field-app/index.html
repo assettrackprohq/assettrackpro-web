@@ -504,7 +504,9 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
             <div class="dh-lbl">Field Operations</div>
             <div class="dh-ttl">AssetTrack<em>Pro</em></div>
             <div class="dh-user" id="dh-user">Loading…</div>
-            <div class="dh-gps" id="dh-gps">📍 <span id="dh-gps-txt">Locating…</span></div>
+            <div id="dh-company" style="font-size:11px;font-weight:800;color:var(--acc);margin-top:1px;display:none;"></div>
+            <div id="dh-date" style="font-size:10px;font-weight:700;color:var(--text2);margin-top:2px;"></div>
+            <div class="dh-gps" id="dh-gps" style="font-weight:700;">📍 <span id="dh-gps-txt">Locating…</span></div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
             <button onclick="toggleTheme()" id="theme-btn" title="Toggle light/dark" style="background:var(--surf2);border:1px solid var(--border);border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">🌙</button>
@@ -1168,7 +1170,7 @@ function captureLoginGPS(){
     // Update login screen stamp
     if(stampEl){stampEl.textContent='📍 '+label;stampEl.style.display='flex';}
     // Update home screen GPS div
-    if(dhGpsTxt)dhGpsTxt.textContent=label;
+    if(dhGpsTxt){dhGpsTxt.textContent=label;dhGpsTxt.style.fontWeight='800';dhGpsTxt.style.color='var(--text)';}
     if(dhGps)dhGps.style.display='flex';
     // ── Store in module var so every asset captured this session carries GPS ──
     currentGPS={lat,lng,label};
@@ -1388,28 +1390,39 @@ function getStatCls(status){
 // INIT
 // ══════════════════════════════════════════════════════
 async function initApp(){
-  document.getElementById('dh-user').textContent=
-    `${new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'long'})} · ${currentUser.name||currentUser.username}`;
+  // Date — bold and prominent
+  const dateEl=document.getElementById('dh-date');
+  if(dateEl) dateEl.textContent=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  document.getElementById('dh-user').textContent=currentUser.name||currentUser.username;
 
-  // Check licence expiry and show in-app warning banner if within 30 days
+  // Project context on home screen
+  const badge=document.getElementById('active-project-badge');
+  if(badge){
+    if(currentProjectName){badge.style.display='';badge.textContent='📁 '+currentProjectName;}
+    else{badge.style.display='none';}
+  }
+  // Update KPI label to reflect project scope
+  const capKL=document.querySelector('#k-cap ~ .ks, .kpi .ks');
+  if(currentProjectName){
+    const kpiSub=document.querySelectorAll('.kpi .ks');
+    if(kpiSub[0]) kpiSub[0].textContent='this project session';
+  }
+
   checkFieldExpiryWarning();
-  // Check for rejected assets needing correction and show home screen notice
   checkRejectedAssets();
 
   const companyId=currentUser.company_id||null;
   loadCustomFieldsForCompany(companyId);
 
-  // Load config scoped to user's company
   if(CONFIGURED){
     try{
-      // Load company name for display
       if(companyId){
         try{
           const cos=await sb.query('companies',`?id=eq.${companyId}&select=name,industry`);
           if(cos&&cos.length){
             const co=cos[0];
-            document.getElementById('dh-user').textContent=
-              `${new Date().toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'long'})} · ${currentUser.name||currentUser.username} · ${co.name}`;
+            const coEl=document.getElementById('dh-company');
+            if(coEl){coEl.style.display='';coEl.textContent='🏢 '+co.name;}
           }
         }catch(e){}
       }
