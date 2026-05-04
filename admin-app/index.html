@@ -391,7 +391,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <div class="sb-sect">Platform</div>
       <button class="nav-item" id="nav-superowner" onclick="show('superowner')" style="display:none;"><span class="ni">👑</span>Super Owner <span class="so-badge" style="margin-left:4px;font-size:8px;padding:2px 6px;">PLATFORM</span></button>
       <div class="sb-sect">Configuration</div>
-      <button class="nav-item" onclick="show('companies')"><span class="ni">🏭</span>Companies</button>
+      <button class="nav-item" onclick="show('companies')" data-superowner-only><span class="ni">🏭</span>Companies</button>
       <button class="nav-item" onclick="show('setup')" data-admin-only><span class="ni">⚙️</span>System Setup</button>
       <button class="nav-item" onclick="show('users')" data-admin-only><span class="ni">👥</span>Users & Roles</button>
       <button class="nav-item" onclick="show('taxonomy')"><span class="ni">🏷️</span>Asset Taxonomy</button>
@@ -531,7 +531,8 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
     <!-- ══ ASSET REGISTER ══ -->
     <div class="panel" id="p-assets">
       <div class="panel-hdr">
-        <div><div class="panel-ttl">Asset Register</div><div class="panel-sub">Full inventory database</div></div>
+        <div><div class="panel-ttl">Asset Register</div><div class="panel-sub">Full inventory database — assets synced from field appear here as Pending until approved</div></div>
+        <button class="act-btn btn-s" style="padding:6px 14px;font-size:11px;" onclick="refreshAssetRegister()" title="Reload assets from database">🔄 Refresh</button>
         <div style="display:flex;gap:9px;">
           <button class="act-btn btn-s" onclick="show('reports')">Export</button>
           <button class="act-btn btn-p" onclick="openAddAsset()">+ Add Asset</button>
@@ -3541,9 +3542,9 @@ function show(name){
     toast('⛔ Activate your licence first — go to Database Setup','err');
     return;
   }
-  // Database Setup: Super Owner only — no tenant should access this
-  if(name === 'database' && currentUser && currentUser.role !== 'super_owner'){
-    toast('⛔ Database Setup is restricted to Super Owner access only','err');
+  // Database Setup and Companies: Super Owner only
+  if((name==='database'||name==='companies') && currentUser && currentUser.role!=='super_owner'){
+    toast('⛔ This section is restricted to Super Owner access only','err');
     return;
   }
   if(typeof currentUser!=='undefined'&&currentUser&&currentUser.role==='sub_admin'&&SUB_ADMIN_BLOCKED.includes(name)){
@@ -4224,21 +4225,8 @@ function openAddUser(){
     <div class="fg"><div class="fl">Role</div>
       <select class="fi" id="nu-role">${roleOptions}</select></div>
     <div style="background:rgba(0,200,160,.05);border:1px solid rgba(0,200,160,.15);border-radius:9px;padding:10px 12px;font-size:11px;color:var(--text2);line-height:1.8;margin-bottom:10px;">
-      The user will only see assets, taxonomy, locations, and departments belonging to their assigned company. 
-      Their permissions are controlled by the System Setup → Field Permissions panel for their role.
-    </div>
-    <div class="fg">
-      <div class="fl" style="margin-bottom:8px;">Assigned Locations <span style="font-size:10px;color:var(--text3);">(leave all unchecked = access all)</span></div>
-      <div style="display:flex;gap:6px;margin-bottom:6px;">
-        <button class="loc-sel-all" type="button" onclick="selectAllLocs('nu-loc-picker')">All</button>
-        <button class="loc-sel-all" type="button" onclick="clearAllLocs('nu-loc-picker')">None</button>
-        <label class="loc-upload-btn">
-          📂 Upload CSV/TXT
-          <input type="file" accept=".csv,.txt,text/plain" style="display:none;" onchange="handleLocUpload(this,'nu-loc-picker')">
-        </label>
-      </div>
-      <div class="loc-picker" id="nu-loc-picker"></div>
-      <div style="font-size:10px;color:var(--text3);margin-top:5px;">Upload a .csv or .txt file with one location per line to auto-select.</div>
+      The user will only see assets and data belonging to their assigned company.
+      Location access is managed per-project via the <strong>📁 Projects</strong> panel.
     </div>
     <div class="fg" style="display:flex;align-items:center;gap:10px;">
       <input type="checkbox" id="nu-firstlogin" checked style="width:14px;height:14px;">
@@ -4248,8 +4236,6 @@ function openAddUser(){
       <button class="act-btn btn-s" onclick="closeModal()">Cancel</button>
       <button class="act-btn btn-p" onclick="saveNewUser()">Create User →</button>
     </div>`);
-  // Build the location picker after modal DOM is ready
-  setTimeout(()=>buildLocPicker('nu-loc-picker',[]),0);
 }
 
 async function saveNewUser(){
@@ -4258,14 +4244,10 @@ async function saveNewUser(){
   const pass=document.getElementById('nu-pass').value.trim();
   const role=document.getElementById('nu-role').value;
   const company_id=document.getElementById('nu-company').value;
-  const assigned_locations=getPickedLocs('nu-loc-picker');
   const is_first_login=document.getElementById('nu-firstlogin')?document.getElementById('nu-firstlogin').checked:true;
   if(!name||!username||!pass){toast('Fill all required fields','err');return;}
   if(allUsers.find(u=>u.username===username)){toast('Username already exists','err');return;}
-
-  // Full payload — includes new columns if migration has been run
-  const userPayload={username,password_hash:pass,name,role,company_id,active:true,is_first_login,assigned_locations,created_at:new Date().toISOString()};
-  // Safe payload — only original columns, used as fallback if new columns missing
+  const userPayload={username,password_hash:pass,name,role,company_id,active:true,is_first_login,created_at:new Date().toISOString()};
   const userPayloadSafe={username,password_hash:pass,name,role,company_id,active:true,created_at:new Date().toISOString()};
 
   let user={...userPayload,id:'U-'+Date.now()};
@@ -4317,19 +4299,6 @@ function editUser(id){
         <span>Account Active</span>
       </label>
     </div>
-    <div class="fg">
-      <div class="fl" style="margin-bottom:8px;">Assigned Locations <span style="font-size:10px;color:var(--text3);">(unchecked all = access all)</span></div>
-      <div style="display:flex;gap:6px;margin-bottom:6px;">
-        <button class="loc-sel-all" type="button" onclick="selectAllLocs('eu-loc-picker')">All</button>
-        <button class="loc-sel-all" type="button" onclick="clearAllLocs('eu-loc-picker')">None</button>
-        <label class="loc-upload-btn">
-          📂 Upload CSV/TXT
-          <input type="file" accept=".csv,.txt,text/plain" style="display:none;" onchange="handleLocUpload(this,'eu-loc-picker')">
-        </label>
-      </div>
-      <div class="loc-picker" id="eu-loc-picker"></div>
-      <div style="font-size:10px;color:var(--text3);margin-top:5px;">Upload a .csv or .txt file with one location per line to auto-select.</div>
-    </div>
     <div class="fg" style="display:flex;align-items:center;gap:10px;">
       <input type="checkbox" id="eu-firstlogin" ${u.is_first_login?'checked':''} style="width:14px;height:14px;">
       <label for="eu-firstlogin" style="font-size:12px;color:var(--text2);cursor:pointer;">Force password change on next login</label>
@@ -4338,10 +4307,8 @@ function editUser(id){
       <button class="act-btn btn-s" onclick="closeModal()">Cancel</button>
       <button class="act-btn btn-p" onclick="saveEditUser('${id}')">Save Changes</button>
     </div>`);
-  // Build picker with user's existing assigned locations pre-ticked
-  const preSelected=Array.isArray(u.assigned_locations)?u.assigned_locations:
-    (u.assigned_locations?u.assigned_locations.split(',').map(l=>l.trim()):[]);
-  setTimeout(()=>buildLocPicker('eu-loc-picker', preSelected),0);
+  // Build picker with user's existing assigned locations pre-ticked — REMOVED
+  // Location assignment is now exclusively through Projects panel
 }
 
 async function saveEditUser(id){
@@ -4353,7 +4320,6 @@ async function saveEditUser(id){
     company_id:document.getElementById('eu-company').value,
     role:document.getElementById('eu-role').value,
     active:document.getElementById('eu-active').checked,
-    assigned_locations:getPickedLocs('eu-loc-picker'),
     is_first_login:document.getElementById('eu-firstlogin')?document.getElementById('eu-firstlogin').checked:false,
   };
   // Safe fallback — original columns only, in case migration SQL not yet run
@@ -7101,14 +7067,33 @@ function toggleTheme(){
 // PROJECTS — Phase 1A
 // ══════════════════════════════════════════════════════
 
+async function refreshAssetRegister(){
+  if(!CONFIGURED||!activeCompanyId){renderAssets();return;}
+  try{
+    toast('Refreshing…','info');
+    const fresh=await sb.query('assets',`?company_id=eq.${activeCompanyId}&select=*&order=created_at.desc`);
+    if(Array.isArray(fresh)){
+      allAssets=allAssets.filter(a=>a.company_id!==activeCompanyId).concat(fresh);
+      renderAssets();
+      updateDashboardKPIs();
+      toast('Asset register refreshed','ok');
+    }
+  }catch(e){toast('Refresh failed: '+e.message,'err');}
+}
+
 function renderProjects(){
   const q=(document.getElementById('proj-search')||{}).value||'';
   const sf=(document.getElementById('proj-status-filter')||{}).value||'';
   const list=document.getElementById('projects-list');
   if(!list)return;
 
-  const scoped=allProjects.filter(p=>
-    (!q||p.name.toLowerCase().includes(q.toLowerCase())||( p.description||'').toLowerCase().includes(q.toLowerCase()))&&
+  // Always scope to active company — prevents cross-tenant visibility
+  const companyScoped=activeCompanyId
+    ?allProjects.filter(p=>p.company_id===activeCompanyId)
+    :allProjects;
+
+  const scoped=companyScoped.filter(p=>
+    (!q||p.name.toLowerCase().includes(q.toLowerCase())||(p.description||'').toLowerCase().includes(q.toLowerCase()))&&
     (!sf||p.status===sf)
   );
 
@@ -7541,11 +7526,18 @@ function applyTemplateToProject(projId){
   if(!p)return;
   const sel=document.getElementById('ep-industry');
   const tmpl=sel?sel.value:'';
-  if(!tmpl)return;
+  if(!tmpl){
+    // "No template" selected — clear project taxonomy, revert to company master
+    if(!confirm('Remove the current taxonomy? The project will use the company master taxonomy instead.'))return;
+    p.taxonomy=null;
+    p.industry_template=null;
+    openEditProject(projId);
+    return;
+  }
   if(!confirm(`Load "${tmpl}" template? This will replace the current taxonomy for this project.`))return;
   p.taxonomy=JSON.parse(JSON.stringify(INDUSTRY_TEMPLATES[tmpl]||INDUSTRY_TEMPLATES['General']));
   p.industry_template=tmpl;
-  openEditProject(projId); // re-render
+  openEditProject(projId);
 }
 
 async function saveEditProject(id){
@@ -7702,9 +7694,15 @@ function _buildLocPicker(uid, projLocs, userLocs, isAssigned){
       +'</label>';
   }).join('');
   return '<div id="uloc-'+uid+'" style="'+(isAssigned?'':'display:none;')+'margin-top:8px;padding:8px;background:var(--surf3);border-radius:8px;">'
-    +'<div style="font-size:10px;color:var(--text3);font-weight:700;margin-bottom:6px;">📍 Assign locations to this user:</div>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+    +'<div style="font-size:10px;color:var(--text3);font-weight:700;">📍 Assign locations:</div>'
+    +'<label style="font-size:10px;background:var(--surf2);border:1px dashed var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--acc);font-weight:700;">'
+    +'📂 Upload list'
+    +'<input type="file" accept=".csv,.txt" style="display:none;" onchange="_uploadUserLocs(this,\''+uid+'\')">'
+    +'</label>'
+    +'</div>'
     +'<div style="display:flex;flex-wrap:wrap;gap:5px;">'+chips+'</div>'
-    +'<div style="font-size:9px;color:var(--text3);margin-top:5px;">Leave all unchecked = access to all '+projLocs.length+' project locations.</div>'
+    +'<div style="font-size:9px;color:var(--text3);margin-top:5px;">Leave all unchecked = access to all '+projLocs.length+' project locations. Upload a CSV/TXT with one location per line.</div>'
     +'</div>';
 }
 
@@ -7743,6 +7741,20 @@ function openAssignProject(projectId){
     +'<button class="act-btn btn-s" onclick="closeModal()">Cancel</button>'
     +'<button class="act-btn btn-p" onclick="saveProjectAssignments(\''+projectId+'\')">&#x2713; Save Assignments</button>'
     +'</div>', {wide:true});
+}
+
+async function _uploadUserLocs(input, uid){
+  const file=input.files[0];
+  if(!file)return;
+  const text=await file.text();
+  const lines=text.split(/\r?\n/).map(l=>l.replace(/^"|"$/g,'').trim()).filter(Boolean);
+  const checkboxes=document.querySelectorAll(`input[data-uid="${uid}"][data-uloc]`);
+  checkboxes.forEach(cb=>{
+    if(lines.includes(cb.dataset.uloc)){cb.checked=true;cb.closest('label').style.background='rgba(0,119,204,.1)';cb.closest('label').style.borderColor='var(--acc)';}
+    else{cb.checked=false;cb.closest('label').style.background='var(--surf2)';cb.closest('label').style.borderColor='var(--border)';}
+  });
+  input.value='';
+  toast(lines.length+' location'+(lines.length!==1?'s':'')+' loaded from file','ok');
 }
 
 function toggleUserLocPicker(uid){
