@@ -2176,16 +2176,17 @@ const DEMO_COMPANIES=[
 async function loadCompanies(){
   if(CONFIGURED){
     try{
-      // Super Owner loads ALL companies. Admin/Sub-Admin: load all then filter client-side
-      // (RLS on Supabase is the true enforcement layer; this is UI scoping)
-      const res=await sb.query('companies','?select=*&order=name.asc');
-      if(Array.isArray(res)&&res.length){
+      // Super Owner loads ALL companies including archived (for management).
+      // All other roles only load active, non-archived companies.
+      const isSO = currentUser && currentUser.role === 'super_owner';
+      const query = isSO
+        ? '?select=*&order=name.asc'
+        : '?select=*&order=name.asc&is_archived=neq.true&active=eq.true';
+      const res=await sb.query('companies', query);
+      if(Array.isArray(res)){
         allCompanies=res;
+        // Always update cache from fresh DB response — never let stale cache override live data
         localStorage.setItem('atp_companies',JSON.stringify(res));
-      } else if(Array.isArray(res)&&res.length===0){
-        const stored=localStorage.getItem('atp_companies');
-        allCompanies=stored?JSON.parse(stored):DEMO_COMPANIES;
-        if(!stored) toast('No companies found in database — showing demo data','info');
       } else {
         console.warn('Supabase companies error:',res);
         const stored=localStorage.getItem('atp_companies');
@@ -4424,8 +4425,70 @@ function renderLocsDepts(){
   if(locHdr) locHdr.textContent='Locations'+co;
   const deptHdr=document.getElementById('depts-hdr');
   if(deptHdr) deptHdr.textContent='Departments'+co;
-  document.getElementById('loc-tags').innerHTML=LOCATIONS.map(l=>`<div class="tag">${l}<button class="tag-x" onclick="removeLoc('${l.replace(/'/g,"\\'")}')">✕</button></div>`).join('');
-  document.getElementById('dept-tags').innerHTML=DEPARTMENTS.map(d=>`<div class="tag">${d}<button class="tag-x" onclick="removeDept('${d.replace(/'/g,"\\'")}')">✕</button></div>`).join('');
+
+  // Build project-grouped location display
+  const locEl=document.getElementById('loc-tags');
+  if(locEl){
+    // Collect which locations belong to which projects
+    const projLocMap={};  // locName → [project names]
+    const activeProjs=allProjects.filter(p=>p.company_id===activeCompanyId&&p.status!=='archived');
+    activeProjs.forEach(p=>{
+      (Array.isArray(p.locations)?p.locations:[]).forEach(l=>{
+        if(!projLocMap[l])projLocMap[l]=[];
+        projLocMap[l].push(p.name);
+      });
+    });
+
+    // Separate locations into: project-specific and general
+    const projGroups={};  // project name → [locations]
+    const generalLocs=[];
+    LOCATIONS.forEach(l=>{
+      const projs=projLocMap[l]||[];
+      if(projs.length===0){
+        generalLocs.push(l);
+      } else {
+        projs.forEach(pn=>{
+          if(!projGroups[pn])projGroups[pn]=[];
+          projGroups[pn].push(l);
+        });
+      }
+    });
+
+    let html='';
+
+    // Render project groups with separators
+    Object.entries(projGroups).forEach(([projName,locs])=>{
+      html+=`<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;margin:6px 0 4px;">
+        <span style="font-size:10px;font-weight:800;color:var(--acc5);white-space:nowrap;">📁 ${projName}</span>
+        <div style="flex:1;height:1px;background:rgba(110,62,196,.2);"></div>
+      </div>`;
+      locs.forEach(l=>{
+        html+=`<div class="tag" style="border-color:rgba(110,62,196,.2);background:rgba(110,62,196,.05);">${l}<button class="tag-x" onclick="removeLoc('${l.replace(/'/g,"\\'")}')">✕</button></div>`;
+      });
+    });
+
+    // Render general (non-project) locations
+    if(generalLocs.length){
+      if(Object.keys(projGroups).length>0){
+        html+=`<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;margin:10px 0 4px;">
+          <span style="font-size:10px;font-weight:800;color:var(--text3);white-space:nowrap;">General</span>
+          <div style="flex:1;height:1px;background:var(--border);"></div>
+        </div>`;
+      }
+      generalLocs.forEach(l=>{
+        html+=`<div class="tag">${l}<button class="tag-x" onclick="removeLoc('${l.replace(/'/g,"\\'")}')">✕</button></div>`;
+      });
+    }
+
+    if(!html) html=`<div style="font-size:11px;color:var(--text3);padding:12px 0;">No locations yet — add one above.</div>`;
+    locEl.innerHTML=html;
+  }
+
+  // Departments — simple flat list (no project grouping needed)
+  const deptEl=document.getElementById('dept-tags');
+  if(deptEl){
+    deptEl.innerHTML=DEPARTMENTS.map(d=>`<div class="tag">${d}<button class="tag-x" onclick="removeDept('${d.replace(/'/g,"\\'")}')">✕</button></div>`).join('');
+  }
 }
 function populateLocsDepts(){renderLocsDepts();}
 function addLoc(){const v=document.getElementById('loc-inp').value.trim();if(!v)return;if(LOCATIONS.includes(v)){toast('Already exists','err');return;}LOCATIONS.push(v);document.getElementById('loc-inp').value='';renderLocsDepts();}
@@ -4501,28 +4564,11 @@ function exportFullCSV(){
   const data=getFilteredForExport();
   if(!data.length){toast('No data to export','err');return;}
   const _fmtDT=d=>{if(!d)return'';try{const dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){return String(d);}};
-  // FIX-6: Added 6 previously missing columns:
-  // Approval Status, Approval Comment, Approved By, Approved At, Custom Fields, Photos
-  const h=[
-    'Barcode','Asset Name','Category','Sub-Category','Location','Department',
-    'Status','Condition','Custodian','Serial',
-    'Registered By','Date & Time Registered',
-    'Last Audit Date & Time','Last Audit By','Audit Changes',
-    'Approval Status','Approval Comment','Approved By','Approved At',
-    'Custom Fields','Photos','Notes'
-  ];
-  const rows=data.map(a=>[
-    a.barcode, a.name, a.category||'', a.sub_category||'',
-    a.location||'', a.department||'', a.status||'', a.condition||'',
-    a.custodian||'', a.serial||'',
-    a.registered_by||'', _fmtDT(a.created_at),
-    _fmtDT(a.last_audit_date), a.last_audit_by||'', a.last_audit_changes||'',
-    a.approval_status||'', a.approval_comment||'',
-    a.approved_by||'', _fmtDT(a.approved_at),
-    a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',
-    Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),
-    a.notes||''
-  ].map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(','));
+  const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At','Custom Fields','Photos','Notes'];
+  const rows=data.map(a=>{
+    const proj=allProjects.find(p=>p.id===a.project_id);
+    return [proj?proj.name:'',a.barcode,a.name,a.category||'',a.sub_category||'',a.location||'',a.department||'',a.status||'',a.condition||'',a.custodian||'',a.serial||'',a.registered_by||'',_fmtDT(a.created_at),_fmtDT(a.last_audit_date),a.last_audit_by||'',a.last_audit_changes||'',a.approval_status||'',a.approval_comment||'',a.approved_by||'',_fmtDT(a.approved_at),a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),a.notes||''].map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(',');
+  });
   const csv=[h.join(','),...rows].join('\n');
   const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
   dlFile('\uFEFF'+csv,'text/csv;charset=utf-8;',`AssetRegister_${_ts}.csv`);
@@ -4533,34 +4579,14 @@ function exportFullExcel(){
   const data=getFilteredForExport();
   if(!data.length){toast('No data','err');return;}
   const _fmtDT2=d=>{if(!d)return'';try{const dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){return String(d);}};
-  // FIX-7: Added missing last_audit_by, approval_status/comment/by/at, custom_fields, photos.
-  // Column order now matches exportFullCSV exactly.
-  const cols=[
-    'barcode','name','category','sub_category','location','department',
-    'status','condition','custodian','serial',
-    'registered_by','created_at',
-    'last_audit_date','last_audit_by','last_audit_changes',
-    'approval_status','approval_comment','approved_by','approved_at',
-    'custom_fields','photos','notes'
-  ];
-  const hdrs=[
-    'Barcode','Asset Name','Category','Sub-Category','Location','Department',
-    'Status','Condition','Custodian','Serial',
-    'Registered By','Date & Time Registered',
-    'Last Audit Date & Time','Last Audit By','Audit Changes',
-    'Approval Status','Approval Comment','Approved By','Approved At',
-    'Custom Fields','Photos','Notes'
-  ];
-  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const header=hdrs.map(h=>`<Cell ss:StyleID="h"><Data ss:Type="String">${esc(h)}</Data></Cell>`).join('');
-  const rows=data.map(a=>`<Row>${cols.map(c=>{
-    let v='';
-    if(c==='created_at'||c==='last_audit_date'||c==='approved_at') v=_fmtDT2(a[c]);
-    else if(c==='photos') v=String(Array.isArray(a[c])?a[c].length:(a[c]?1:0));
-    else if(c==='custom_fields') v=a[c]?(typeof a[c]==='string'?a[c]:JSON.stringify(a[c])):'';
-    else v=String(a[c]||'');
-    return `<Cell><Data ss:Type="String">${esc(v)}</Data></Cell>`;
-  }).join('')}</Row>`).join('');
+  const hdrs=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At','Custom Fields','Photos','Notes'];
+  const escX=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const header=hdrs.map(h=>`<Cell ss:StyleID="h"><Data ss:Type="String">${escX(h)}</Data></Cell>`).join('');
+  const rows=data.map(a=>{
+    const proj=allProjects.find(p=>p.id===a.project_id);
+    const vals=[proj?proj.name:'',a.barcode,a.name,a.category||'',a.sub_category||'',a.location||'',a.department||'',a.status||'',a.condition||'',a.custodian||'',a.serial||'',a.registered_by||'',_fmtDT2(a.created_at),_fmtDT2(a.last_audit_date),a.last_audit_by||'',a.last_audit_changes||'',a.approval_status||'',a.approval_comment||'',a.approved_by||'',_fmtDT2(a.approved_at),a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),a.notes||''];
+    return `<Row>${vals.map(v=>`<Cell><Data ss:Type="String">${escX(v)}</Data></Cell>`).join('')}</Row>`;
+  }).join('');
   const xml=`<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="h"><Font ss:Bold="1"/></Style></Styles><Worksheet ss:Name="Assets"><Table><Row>${header}</Row>${rows}</Table></Worksheet></Workbook>`;
   const _xts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
   dlFile(xml,'application/vnd.ms-excel',`AssetRegister_${_xts}.xls`);
@@ -4568,17 +4594,14 @@ function exportFullExcel(){
 }
 
 function exportAuditReport(){
-  const data=allAssets;
+  const data=allAssets.filter(a=>!activeCompanyId||a.company_id===activeCompanyId);
   const audited=data.filter(a=>a.last_audit_date);
   const pending=data.filter(a=>!a.last_audit_date);
-  // FIX-8: Added Approval Status column; added BOM prefix so Excel opens correctly.
-  const h=['Barcode','Asset Name','Location','Department','Status','Approval Status','Last Audit Date','Audited By','Changes','Notes'];
-  const rows=[...audited,...pending].map(a=>[
-    a.barcode, a.name, a.location||'', a.department||'',
-    a.status, a.approval_status||'pending',
-    a.last_audit_date?new Date(a.last_audit_date).toLocaleDateString('en-GB'):'PENDING',
-    a.last_audit_by||'', a.last_audit_changes||'', a.notes||''
-  ].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(','));
+  const h=['Project','Barcode','Asset Name','Location','Department','Status','Approval Status','Last Audit Date','Audited By','Changes','Notes'];
+  const rows=[...audited,...pending].map(a=>{
+    const proj=allProjects.find(p=>p.id===a.project_id);
+    return [proj?proj.name:'',a.barcode,a.name,a.location||'',a.department||'',a.status,a.approval_status||'pending',a.last_audit_date?new Date(a.last_audit_date).toLocaleDateString('en-GB'):'PENDING',a.last_audit_by||'',a.last_audit_changes||'',a.notes||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');
+  });
   dlFile('\uFEFF'+[h.join(','),...rows].join('\n'),'text/csv;charset=utf-8;',`AuditReport_${new Date().toISOString().split('T')[0]}.csv`);
   toast('Audit report exported!','ok');
 }
@@ -4586,8 +4609,8 @@ function exportAuditReport(){
 function exportByDept(){
   const data=getFilteredForExport();
   const depts={};data.forEach(a=>{const d=a.department||'Unassigned';if(!depts[d])depts[d]=[];depts[d].push(a);});
-  const h=['Department','Barcode','Asset Name','Location','Status','Condition','Custodian'];
-  const rows=[];Object.entries(depts).forEach(([d,assets])=>{assets.forEach(a=>rows.push([d,a.barcode,a.name,a.location||'',a.status,a.condition||'',a.custodian||''].map(v=>'"'+String(v)+'"').join(',')));});
+  const h=['Project','Department','Barcode','Asset Name','Location','Status','Condition','Custodian'];
+  const rows=[];Object.entries(depts).forEach(([d,assets])=>{assets.forEach(a=>{const proj=allProjects.find(p=>p.id===a.project_id);rows.push([proj?proj.name:'',d,a.barcode,a.name,a.location||'',a.status,a.condition||'',a.custodian||''].map(v=>'"'+String(v)+'"').join(','));});});
   dlFile([h.join(','),...rows].join('\n'),'text/csv',`AssetsByDept_${new Date().toISOString().split('T')[0]}.csv`);
   toast('Department report exported!','ok');
 }
@@ -4595,8 +4618,8 @@ function exportByDept(){
 function exportByLoc(){
   const data=getFilteredForExport();
   const locs={};data.forEach(a=>{const l=a.location||'Unspecified';if(!locs[l])locs[l]=[];locs[l].push(a);});
-  const h=['Location','Barcode','Asset Name','Department','Status','Condition','Custodian'];
-  const rows=[];Object.entries(locs).forEach(([l,assets])=>{assets.forEach(a=>rows.push([l,a.barcode,a.name,a.department||'',a.status,a.condition||'',a.custodian||''].map(v=>'"'+String(v)+'"').join(',')));});
+  const h=['Project','Location','Barcode','Asset Name','Department','Status','Condition','Custodian'];
+  const rows=[];Object.entries(locs).forEach(([l,assets])=>{assets.forEach(a=>{const proj=allProjects.find(p=>p.id===a.project_id);rows.push([proj?proj.name:'',l,a.barcode,a.name,a.department||'',a.status,a.condition||'',a.custodian||''].map(v=>'"'+String(v)+'"').join(','));});});
   dlFile([h.join(','),...rows].join('\n'),'text/csv',`AssetsByLocation_${new Date().toISOString().split('T')[0]}.csv`);
   toast('Location report exported!','ok');
 }
@@ -6766,6 +6789,7 @@ async function archiveTenant(id, name){
     if(i>=0){Object.assign(cos[i],updates);localStorage.setItem('atp_companies',JSON.stringify(cos));}
   }
   toast(`🗄 ${name} archived — data preserved, users locked out`,'warn');
+  localStorage.setItem('atp_companies', JSON.stringify(allCompanies));
   renderSuperOwner();
   if(activeCompanyId===id) checkLicenceGate();
 }
@@ -6813,6 +6837,8 @@ async function deleteTenantPermanent(id, name){
   allCompanies = allCompanies.filter(c=>c.id!==id);
   allUsers     = allUsers.filter(u=>u.company_id!==id);
   allAssets    = allAssets.filter(a=>a.company_id!==id);
+  // Update localStorage cache immediately so it doesn't resurrect on next login
+  localStorage.setItem('atp_companies', JSON.stringify(allCompanies));
   if(activeCompanyId===id && allCompanies.length) switchWorkspace(allCompanies[0].id);
   toast(`🗑 ${name} permanently deleted`,'ok');
   populateWorkspaceSelector(); populateUsersCoFilter(); renderSuperOwner();
@@ -7694,16 +7720,65 @@ function _buildLocPicker(uid, projLocs, userLocs, isAssigned){
       +'</label>';
   }).join('');
   return '<div id="uloc-'+uid+'" style="'+(isAssigned?'':'display:none;')+'margin-top:8px;padding:8px;background:var(--surf3);border-radius:8px;">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
-    +'<div style="font-size:10px;color:var(--text3);font-weight:700;">📍 Assign locations:</div>'
-    +'<label style="font-size:10px;background:var(--surf2);border:1px dashed var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--acc);font-weight:700;">'
-    +'📂 Upload list'
-    +'<input type="file" accept=".csv,.txt" style="display:none;" onchange="_uploadUserLocs(this,\''+uid+'\')">'
-    +'</label>'
-    +'</div>'
+    +'<div style="font-size:10px;color:var(--text3);font-weight:700;margin-bottom:6px;">📍 Locations for this user:</div>'
     +'<div style="display:flex;flex-wrap:wrap;gap:5px;">'+chips+'</div>'
-    +'<div style="font-size:9px;color:var(--text3);margin-top:5px;">Leave all unchecked = access to all '+projLocs.length+' project locations. Upload a CSV/TXT with one location per line.</div>'
+    +'<div style="font-size:9px;color:var(--text3);margin-top:5px;">Leave all unchecked = all '+projLocs.length+' project locations.</div>'
     +'</div>';
+}
+
+// Bulk location assignment — CSV format: Username, Location (one per row)
+async function _bulkLocUpload(input, projectId){
+  const file=input.files[0];if(!file)return;
+  const text=await file.text();
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  // Skip header row if it contains "username" or "user"
+  const dataLines=(/^username|^user/i).test(lines[0])?lines.slice(1):lines;
+  let assigned=0, skipped=0;
+  dataLines.forEach(function(line){
+    const parts=line.split(',').map(function(p){return p.replace(/^"|"$/g,'').trim();});
+    const username=parts[0];
+    const loc=parts[1]||'';
+    if(!username||!loc){skipped++;return;}
+    // Find the checkbox for this user+location and tick it
+    // First ensure the user is checked
+    const allUidInputs=[...document.querySelectorAll('#assign-user-list input[data-uid]:not([data-uloc])')];
+    const uCheck=allUidInputs.find(function(cb){
+      const uid=cb.dataset.uid;
+      const u=allUsers.find(function(u){return u.id===uid;});
+      return u&&(u.username||'').toLowerCase()===(username||'').toLowerCase();
+    });
+    if(!uCheck){skipped++;return;}
+    if(!uCheck.checked){uCheck.checked=true;toggleUserLocPicker(uCheck.dataset.uid);}
+    // Tick the location checkbox for this user
+    const locCb=document.querySelector('input[data-uid="'+uCheck.dataset.uid+'"][data-uloc="'+loc.replace(/"/g,'&quot;')+'"]');
+    if(locCb){locCb.checked=true;assigned++;}
+    else skipped++;
+  });
+  input.value='';
+  toast(assigned+' location assignment'+(assigned!==1?'s':'')+' applied · '+skipped+' skipped','ok');
+}
+
+function _dlLocAssignTemplate(projectId){
+  const p=allProjects.find(p=>p.id===projectId);
+  if(!p)return;
+  const projLocs=Array.isArray(p.locations)?p.locations:[];
+  const fieldUsers=allUsers.filter(function(u){return ['field','auditor'].includes(u.role)&&u.active!==false&&(!u.company_id||u.company_id===activeCompanyId);});
+  const rows=['Username,Location','# Format: one row per assignment'];
+  if(fieldUsers.length&&projLocs.length){
+    // Show first user × first 2 locations as examples
+    rows.push(fieldUsers[0].username+','+projLocs[0]);
+    if(projLocs[1]) rows.push(fieldUsers[0].username+','+projLocs[1]);
+    if(fieldUsers[1]&&projLocs[2]) rows.push(fieldUsers[1].username+','+projLocs[2]);
+  }
+  const allLocRows=projLocs.map(function(l){return '# Available location: '+l;});
+  const allUserRows=fieldUsers.map(function(u){return '# Available user: '+u.username+' ('+u.name+')';});
+  const csv=rows.concat([''],allLocRows,[''],allUserRows).join('\n');
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');document.body.appendChild(a);
+  a.href=url;a.download=(p.name||'Project').replace(/\s+/g,'_')+'_LocationAssignment_Template.csv';
+  a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},300);
+  toast('Template downloaded','ok');
 }
 
 function openAssignProject(projectId){
@@ -7734,9 +7809,21 @@ function openAssignProject(projectId){
   const locNote=projLocs.length
     ?'<strong style="color:var(--acc);">This project has '+projLocs.length+' location'+(projLocs.length>1?'s':'')+'.</strong>'
     :'<strong style="color:var(--acc3);">No locations set — use the 📍 Locations button to add them first.</strong>';
+  const bulkUpload=projLocs.length
+    ?'<div style="background:var(--surf2);border:1px dashed var(--border);border-radius:10px;padding:12px 14px;margin-bottom:12px;">'
+      +'<div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:5px;">📂 Bulk assign locations via CSV</div>'
+      +'<div style="font-size:10px;color:var(--text2);margin-bottom:8px;">Two columns: <code style="background:var(--surf3);padding:1px 5px;border-radius:4px;font-weight:700;">Username, Location</code> — one row per assignment.</div>'
+      +'<div style="display:flex;gap:8px;">'
+      +'<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:var(--acc);color:#0a1e38;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:11px;font-weight:800;">'
+      +'⬆ Upload CSV<input type="file" accept=".csv,.txt" style="display:none;" onchange="_bulkLocUpload(this,\''+projectId+'\')">'
+      +'</label>'
+      +'<button onclick="_dlLocAssignTemplate(\''+projectId+'\')" style="padding:8px 14px;font-size:11px;font-weight:700;background:var(--surf3);border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text2);">⬇ Template</button>'
+      +'</div></div>'
+    :'';
   openModal('<div class="modal-ttl">👥 Assign Agents \u2014 '+p.name+'</div>'
-    +'<div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Check a user to assign them, then select their locations. '+locNote+'</div>'
-    +'<div id="assign-user-list" style="max-height:65vh;overflow-y:auto;">'+userRows+'</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Check a user to assign them, then select their locations. '+locNote+'</div>'
+    +bulkUpload
+    +'<div id="assign-user-list" style="max-height:52vh;overflow-y:auto;">'+userRows+'</div>'
     +'<div class="modal-acts">'
     +'<button class="act-btn btn-s" onclick="closeModal()">Cancel</button>'
     +'<button class="act-btn btn-p" onclick="saveProjectAssignments(\''+projectId+'\')">&#x2713; Save Assignments</button>'
