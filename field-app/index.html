@@ -2085,27 +2085,29 @@ function blobDownload(blob, filename){
 function exportHistoryCSV(){
   const hist=getMyHistory();
   if(!hist.length){toast('No history to export','err');return;}
-  const h=['Barcode','Asset Name','Category','Sub-Category','Location','Department',
+  const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
     'Status','Condition','Custodian','Serial','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
     'GPS Latitude','GPS Longitude','GPS Location',
     'Registered By','Date Captured','Cloud Synced'];
-  const rows=hist.map(a=>[
-    a.barcode, a.name, a.category||'', a.sub_category||'',
-    a.location||'', a.department||'', a.status||'', a.condition||'',
-    a.custodian||'', a.serial||'', a.notes||'',
-    a.approval_status||'pending', a.approval_comment||'',
-    a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
-    a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
-    a.registered_by||'',
-    a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
-    a.cloud?'Yes':'No'
-  ].map(v=>'\"'+String(v).replace(/"/g,'""')+'\"').join(','));
+  const rows=hist.map(function(a){
+    return [
+      a.project_name||'',
+      a.barcode, a.name, a.category||'', a.sub_category||'',
+      a.location||'', a.department||'', a.status||'', a.condition||'',
+      a.custodian||'', a.serial||'', a.notes||'',
+      a.approval_status||'pending', a.approval_comment||'',
+      a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
+      a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
+      a.registered_by||'',
+      a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
+      a.cloud?'Yes':'No'
+    ].map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');
+  });
   const filename='CaptureHistory_'+(currentUser?currentUser.username:'field')+'_'+new Date().toISOString().split('T')[0]+'.csv';
-  triggerDownload([h.join(','),...rows].join('\n'), filename);
+  triggerDownload('\uFEFF'+[h.join(',')].concat(rows).join('\n'), filename);
   toast('History exported \u2713','ok');
 }
-
 
 // ══════════════════════════════════════════════════════
 // OFFLINE SYNC QUEUE
@@ -2142,18 +2144,25 @@ async function syncPendingAssets(){
     try{
       showSaving('Syncing '+synced+'/'+q.length+'…');
       let res = await sb.insert('assets', asset).catch(async e=>{
-        // Schema cache error — column doesn't exist in DB yet
-        // Retry once with GPS fields stripped so other data still syncs
         const msg = e.message||'';
+        // Already exists in DB (duplicate barcode) — treat as synced, remove from queue
+        if(msg.includes('duplicate key')||msg.includes('unique constraint')||msg.includes('assets_barcode')){
+          return {_already_exists:true};
+        }
+        // Schema cache error — retry without GPS fields
         if(msg.includes('schema cache')||msg.includes('column')||msg.includes('capture')){
-          const stripped = Object.fromEntries(
-            Object.entries(asset).filter(([k])=>!GPS_COLS.includes(k))
-          );
-          return await sb.insert('assets', stripped);
+          const GPS_COLS=['capture_lat','capture_lng','capture_location'];
+          const stripped=Object.fromEntries(Object.entries(asset).filter(([k])=>!GPS_COLS.includes(k)));
+          return await sb.insert('assets',stripped);
         }
         throw e;
       });
-      if(Array.isArray(res)){
+      if(res&&res._already_exists){
+        // Asset already in DB — just clear from queue and mark history as synced
+        synced++;
+        markHistoryCloud(asset.id);
+        currentCompanyAssetCount++;
+      } else if(Array.isArray(res)){
         synced++;
         markHistoryCloud(asset.id);
         currentCompanyAssetCount++;
@@ -2388,7 +2397,6 @@ async function saveAsset(){
   if(CONFIGURED && navigator.onLine){
     try{
       const res=await sb.insert('assets',asset);
-      // sb.insert now throws on HTTP error — success = array returned
       if(Array.isArray(res)){
         currentCompanyAssetCount++;
         finishSave(true);
@@ -2397,8 +2405,15 @@ async function saveAsset(){
         finishSave(false,'Unexpected response: '+JSON.stringify(res).slice(0,100));
       }
     }catch(e){
-      saveLocally(asset);
-      finishSave(false, e.message);
+      const msg=e.message||'';
+      if(msg.includes('duplicate key')||msg.includes('unique constraint')||msg.includes('assets_barcode')){
+        // Already exists in DB — treat as a successful save, don't queue again
+        currentCompanyAssetCount++;
+        finishSave(true);
+      } else {
+        saveLocally(asset);
+        finishSave(false, e.message);
+      }
     }
   } else {
     // Offline or not configured — save locally and queue for sync
@@ -2753,29 +2768,29 @@ function renderSpool(){
 
 function spoolCSV(){
   if(!sessionAssets.length){toast('No captures in this session','err');return;}
-  const h=[
-    'Barcode','Asset Name','Category','Sub-Category','Location','Department',
+  const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
     'Status','Condition','Custodian','Serial','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
     'GPS Latitude','GPS Longitude','GPS Location',
-    'Registered By','Date Captured','Cloud Synced'
-  ];
-  const rows=sessionAssets.map(a=>[
-    a.barcode, a.name, a.category||'', a.sub_category||'',
-    a.location||'', a.department||'', a.status||'', a.condition||'',
-    a.custodian||'', a.serial||'', a.notes||'',
-    a.approval_status||'pending', a.approval_comment||'',
-    a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
-    a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
-    a.registered_by||'',
-    a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
-    a._synced?'Yes':'No'
-  ].map(v=>'\"'+String(v||'').replace(/"/g,'""')+'\"').join(','));
+    'Registered By','Date Captured','Cloud Synced'];
+  const rows=sessionAssets.map(function(a){
+    return [
+      currentProjectName||'',
+      a.barcode, a.name, a.category||'', a.sub_category||'',
+      a.location||'', a.department||'', a.status||'', a.condition||'',
+      a.custodian||'', a.serial||'', a.notes||'',
+      a.approval_status||'pending', a.approval_comment||'',
+      a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
+      a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
+      a.registered_by||'',
+      a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
+      a._synced?'Yes':'No'
+    ].map(function(v){return '"'+String(v||'').replace(/"/g,'""')+'"';}).join(',');
+  });
   const filename='Spool_'+currentUser.username+'_'+new Date().toISOString().split('T')[0]+'.csv';
-  triggerDownload([h.join(','),...rows].join('\n'), filename);
+  triggerDownload('\uFEFF'+[h.join(',')].concat(rows).join('\n'), filename);
   toast('Spool exported \u2713','ok');
 }
-
 
 function spoolShare(){
   const text=`AssetTrackPro Spool — ${currentUser.name||currentUser.username}\n${new Date().toLocaleDateString('en-GB')}\nRegistered: ${sessionAssets.length} assets\nAudited: ${sessionAudit.length}\n\n`+
