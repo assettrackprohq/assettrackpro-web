@@ -6945,20 +6945,32 @@ async function deleteTenantPermanent(id, name){
 
   if(CONFIGURED){
     try{
-      // Delete child records first using correct PostgREST filter syntax
-      await sb.remove('project_assignments', `company_id=eq.${id}`).catch(()=>{});
-      await sb.remove('projects',           `company_id=eq.${id}`).catch(()=>{});
-      await sb.remove('capture_log',        `company_id=eq.${id}`).catch(()=>{});
-      await sb.remove('audit_log',          `company_id=eq.${id}`).catch(()=>{});
-      await sb.remove('assets',             `company_id=eq.${id}`).catch(()=>{});
-      await sb.remove('users',              `company_id=eq.${id}`).catch(()=>{});
-      await sb.remove('config',             `company_id=eq.${id}`).catch(()=>{});
-      // Delete the company itself — this must succeed
+      // Delete child records in correct FK order — each must succeed before proceeding
+      const cascadeTables=[
+        ['project_assignments', `company_id=eq.${id}`],
+        ['projects',            `company_id=eq.${id}`],
+        ['capture_log',         `company_id=eq.${id}`],
+        ['audit_log',           `company_id=eq.${id}`],
+        ['assets',              `company_id=eq.${id}`],
+        ['users',               `company_id=eq.${id}`],
+        ['config',              `company_id=eq.${id}`],
+      ];
+      for(const [table, filter] of cascadeTables){
+        try{
+          await sb.remove(table, filter);
+        }catch(e){
+          // Table may not exist (e.g. config) — ignore 404-style errors, throw real ones
+          const msg=e.message||'';
+          if(!msg.includes('does not exist')&&!msg.includes('42P01')){
+            throw new Error(`Failed clearing ${table}: ${msg}`);
+          }
+        }
+      }
+      // All children cleared — now delete the company
       await sb.remove('companies', `id=eq.${id}`);
     }catch(e){
-      toast('Delete failed — '+e.message+'. Check for related records in Supabase.','err');
-      // Do NOT update local state — company is still in DB
-      return;
+      toast('Delete failed — '+e.message,'err');
+      return; // Do NOT update local state — company is still in DB
     }
   } else {
     const cos=JSON.parse(localStorage.getItem('atp_companies')||'[]').filter(c=>c.id!==id);
