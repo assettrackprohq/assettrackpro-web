@@ -1051,11 +1051,11 @@ async function checkTenantAccessAtLogin(user){
         const projIds=assignRes.map(a=>a.project_id);
         window._userProjLocs={};
         assignRes.forEach(a=>{window._userProjLocs[a.project_id]=Array.isArray(a.assigned_locations)?a.assigned_locations:[];});
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations`);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations,active_locations`);
         userProjects=Array.isArray(allProjRes)?allProjRes.filter(p=>projIds.includes(p.id)):[];
       } else {
         window._userProjLocs={};
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations`);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations,active_locations`);
         userProjects=Array.isArray(allProjRes)?allProjRes:[];
       }
     }catch(e){ userProjects=[]; console.warn('projectFetch:',e.message); }
@@ -1583,17 +1583,14 @@ function getAssignedLocations(){
 
   if(currentProjectId){
     const proj=userProjects.find(p=>p.id===currentProjectId);
-    const projLocs=Array.isArray(proj?.locations)?proj.locations:[];
+    // Prefer user's specific assigned locations, else show project's active locations
     const userProjLocs=(window._userProjLocs||{})[currentProjectId]||[];
+    const projActiveLocs=Array.isArray(proj?.active_locations)&&proj.active_locations.length
+      ?proj.active_locations
+      :(Array.isArray(proj?.locations)?proj.locations:[]);
 
-    if(userProjLocs.length>0){
-      // User has specific locations assigned for this project
-      return userProjLocs;
-    }
-    if(projLocs.length>0){
-      // No specific assignment but project has locations — show all project locations
-      return projLocs;
-    }
+    if(userProjLocs.length>0) return userProjLocs;
+    if(projActiveLocs.length>0) return projActiveLocs;
   }
 
   // Fallback — company-wide assigned_locations on user record
