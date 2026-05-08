@@ -1826,7 +1826,9 @@ function persistHistory(asset, cloudSaved){
     const key='atp_history_'+uname;
     let hist=[];
     try{hist=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-    hist.unshift({
+    // Guard: if this asset ID already exists in history, update it instead of adding again
+    const existingIdx=hist.findIndex(h=>h.id===asset.id||h.barcode===asset.barcode);
+    const record={
       id:asset.id, barcode:asset.barcode, name:asset.name,
       category:asset.category, sub_category:asset.sub_category,
       location:asset.location, department:asset.department,
@@ -1841,7 +1843,13 @@ function persistHistory(asset, cloudSaved){
       capture_lat:asset.capture_lat||null,
       capture_lng:asset.capture_lng||null,
       capture_location:asset.capture_location||null,
-    });
+    };
+    if(existingIdx>=0){
+      // Update in place — don't add a second entry
+      hist[existingIdx]={...hist[existingIdx],...record};
+    } else {
+      hist.unshift(record);
+    }
     if(hist.length>500)hist=hist.slice(0,500);
     localStorage.setItem(key,JSON.stringify(hist));
     updateSyncBadge();
@@ -2362,8 +2370,10 @@ async function saveAsset(){
   showSaving('Saving to database…');
 
   function finishSave(cloudOk, cloudErr){
-    // Always push to session spool regardless of cloud result
-    sessionAssets.push(asset);
+    // Guard: never add the same barcode to spool twice in one session
+    if(!sessionAssets.some(a=>a.barcode===asset.barcode)){
+      sessionAssets.push(asset);
+    }
     if(fromAudit){
       sessionAudit.push(asset.id);
       asset.last_audit_date=new Date().toISOString();
@@ -2404,9 +2414,16 @@ async function saveAsset(){
     }catch(e){
       const msg=e.message||'';
       if(msg.includes('duplicate key')||msg.includes('unique constraint')||msg.includes('assets_barcode')){
-        // Already exists in DB — treat as a successful save, don't queue again
-        currentCompanyAssetCount++;
-        finishSave(true);
+        // Barcode already in DB — do NOT call finishSave (would double-record in history/spool)
+        // This happens when an offline-saved asset was already synced in a previous session
+        // but stayed in the pending queue. Mark history as synced and clear the queue.
+        markHistoryCloud(asset.id);
+        const q=getPendingQueue().filter(a=>a.barcode!==asset.barcode);
+        localStorage.setItem('atp_sync_queue',JSON.stringify(q));
+        hideSaving();
+        btn.disabled=false;
+        toast('Barcode already registered — marked as synced ✓','ok');
+        setTimeout(()=>go(fromAudit?'audit':'home'),800);
       } else {
         saveLocally(asset);
         finishSave(false, e.message);
