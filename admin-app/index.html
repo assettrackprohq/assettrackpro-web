@@ -1742,21 +1742,23 @@ let LICENCE_GATE_ACTIVE = false;// true = navigation locked to Database Setup on
 // ══════════════════════════════════════════════════════
 // SUPABASE CONFIG — same keys as field.html
 // ══════════════════════════════════════════════════════
-const SUPABASE_URL = 'https://qeqiwcypmeexihqbvweu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFlcWl3Y3lwbWVleGlocWJ2d2V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxMzg2NjYsImV4cCI6MjA4ODcxNDY2Nn0.7VEzqq18zlqul2HXDuskRXs4ideHAodbvibGxTaBOF4';
+const SUPABASE_URL = 'https://olcteqqdiycrwiveytbp.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9sY3RlcXFkaXljcndpdmV5dGJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0NTA0ODMsImV4cCI6MjA5OTAyNjQ4M30.QgRXNTWhOBai0NF-UxmItQfy7-vUmFEAaz6DYC_ld04';
 const CONFIGURED = SUPABASE_URL !== 'YOUR_SUPABASE_URL';
+let sbSession=null; // real Supabase Auth session, set after atp-login succeeds
+function authToken(){ return (sbSession&&sbSession.access_token)?sbSession.access_token:SUPABASE_ANON_KEY; }
 
 const sb = {
   async query(table, params=''){
     const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}${params}`,{
-      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken()}
     });
     return r.json();
   },
   async insert(table, data){
     const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}`,{
       method:'POST',
-      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=representation'},
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),'Content-Type':'application/json','Prefer':'return=representation'},
       body:JSON.stringify(data)
     });
     return r.json();
@@ -1764,7 +1766,7 @@ const sb = {
   async update(table, id, data){
     const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`,{
       method:'PATCH',
-      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=representation'},
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),'Content-Type':'application/json','Prefer':'return=representation'},
       body:JSON.stringify(data)
     });
     if(!r.ok){try{return await r.json();}catch(e){return {code:r.status,message:r.statusText};}}
@@ -1777,10 +1779,20 @@ const sb = {
     const filter = String(id).includes('=') ? id : `id=eq.${id}`;
     const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filter}`,{
       method:'DELETE',
-      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken()}
     });
     if(!r.ok){const t=await r.text();throw new Error(t||r.statusText);}
     return true;
+  },
+  async invoke(fnName, payload){
+    const r=await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`,{
+      method:'POST',
+      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    const body=await r.json();
+    if(!r.ok) throw new Error((body&&body.error)||JSON.stringify(body));
+    return body;
   }
 };
 
@@ -2050,6 +2062,7 @@ async function refreshOnPremLicenceUI(){
 // STATE
 // ══════════════════════════════════════════════════════
 let currentUser=null;
+let pendingChangeToken=null;
 let allAssets=[];
 let allUsers=[];
 let auditLog=[];
@@ -3106,20 +3119,23 @@ async function doLogin(){
   try{
     let user=null;
     if(CONFIGURED){
-      // Step 1: check if username exists at all
       let res;
       try{
-        res=await sb.query('users',`?username=eq.${encodeURIComponent(u)}&select=*`);
+        res=await sb.invoke('atp-login',{username:u,password:p,portal:'admin'});
       }catch(netErr){
         errEl.textContent='⚠ Network error — check your connection and try again.';return;
       }
-      if(!res||res.code){errEl.textContent='⚠ Network error — could not reach server.';return;}
-      if(!Array.isArray(res)||res.length===0){errEl.textContent='❌ User not found. Check your username.';return;}
-      const found=res[0];
-      if(found.password_hash!==p){errEl.textContent='🔑 Incorrect password. Try again.';return;}
-      if(!['admin','sub_admin','super_owner'].includes(found.role)){errEl.textContent='⛔ Your role does not have access to the Admin Portal.';return;}
-      if(found.active===false){errEl.textContent='⛔ This account has been deactivated. Contact your administrator.';return;}
-      user=found;
+      if(res&&res.error){
+        const msg={
+          invalid_credentials:'❌ Incorrect username or password.',
+          account_deactivated:'⛔ This account has been deactivated. Contact your administrator.',
+          wrong_portal_field:'⛔ Your role does not have access to the Admin Portal.'
+        }[res.error]||'⚠ Login failed — please try again.';
+        errEl.textContent=msg;return;
+      }
+      user=res.user;
+      sbSession=res.session||null;
+      pendingChangeToken=res.changeToken||null;
     } else {
       const demoUser=DEMO_ADMINS.find(x=>x.username===u);
       if(!demoUser){errEl.textContent='❌ User not found. Check your username.';return;}
@@ -3163,11 +3179,13 @@ async function commitFirstLoginPassword(){
   if(!np||np.length<6){errEl.textContent='Password must be at least 6 characters.';return;}
   if(np!==cp){errEl.textContent='Passwords do not match.';return;}
   if(CONFIGURED&&pendingFirstLoginUser&&pendingFirstLoginUser.id){
+    if(!pendingChangeToken){errEl.textContent='Session expired — please log in again.';return;}
     try{
-      await sb.update('users',pendingFirstLoginUser.id,{password_hash:np,is_first_login:false});
+      const r=await sb.invoke('atp-set-password',{mode:'first_login',userId:pendingFirstLoginUser.id,newPassword:np,changeToken:pendingChangeToken});
+      if(r&&r.error){errEl.textContent=r.error;return;}
     }catch(e){errEl.textContent='Save error: '+e.message;return;}
   }
-  pendingFirstLoginUser.password_hash=np;
+  pendingChangeToken=null;
   pendingFirstLoginUser.is_first_login=false;
   document.getElementById('fcp-overlay').classList.remove('open');
   completeLogin(pendingFirstLoginUser);
@@ -4272,8 +4290,12 @@ async function saveNewUser(){
   const is_first_login=document.getElementById('nu-firstlogin')?document.getElementById('nu-firstlogin').checked:true;
   if(!name||!username||!pass){toast('Fill all required fields','err');return;}
   if(allUsers.find(u=>u.username===username)){toast('Username already exists','err');return;}
-  const userPayload={username,password_hash:pass,name,role,company_id,active:true,is_first_login,created_at:new Date().toISOString()};
-  const userPayloadSafe={username,password_hash:pass,name,role,company_id,active:true,created_at:new Date().toISOString()};
+  // password_hash is set to an unusable random placeholder here — the real
+  // password is hashed server-side via atp-set-password right after insert,
+  // so the client never writes a real password into this column directly.
+  const placeholder='!unset-'+(crypto.randomUUID?crypto.randomUUID():(''+Math.random()+Date.now()));
+  const userPayload={username,password_hash:placeholder,name,role,company_id,active:true,is_first_login,created_at:new Date().toISOString()};
+  const userPayloadSafe={username,password_hash:placeholder,name,role,company_id,active:true,created_at:new Date().toISOString()};
 
   let user={...userPayload,id:'U-'+Date.now()};
   if(CONFIGURED){
@@ -4290,6 +4312,16 @@ async function saveNewUser(){
         toast('Cloud save failed: '+(result.message||result.code),'err');
         console.error('User insert error:',result);
         return;
+      }
+      // Now set the real (hashed, server-side) password for the new user.
+      const adminPass=prompt('Confirm your admin password to finish creating this user:');
+      if(!adminPass){
+        toast('⚠ User created, but password not set — use Reset Password to set it.','warn');
+      } else {
+        try{
+          const r=await sb.invoke('atp-set-password',{mode:'admin_set',adminUsername:currentUser.username,adminPassword:adminPass,targetUserId:user.id,newPassword:pass,forceFirstLogin:is_first_login});
+          if(r&&r.error){toast('⚠ User created, but password set failed: '+r.error,'warn');}
+        }catch(e){toast('⚠ User created, but password set failed: '+e.message,'warn');}
       }
     }
     catch(e){toast('Error creating user: '+e.message,'err');return;}
@@ -4356,7 +4388,8 @@ async function saveEditUser(id){
     active:updates.active,
   };
   const newPass=document.getElementById('eu-pass').value.trim();
-  if(newPass){updates.password_hash=newPass;updatesSafe.password_hash=newPass;}
+  // password_hash is intentionally never included in this update — it's set
+  // separately below via atp-set-password, hashed server-side.
   if(CONFIGURED){
     try{
       let result=await sb.update('users',id,updates);
@@ -4369,6 +4402,21 @@ async function saveEditUser(id){
         toast('❌ Update failed: '+(result.message||result.code),'err');
         console.error('saveEditUser error:',result);
         return;
+      }
+      if(newPass){
+        if(newPass.length<6){
+          toast('⚠ Profile saved, but password not changed — must be 6+ characters.','warn');
+        } else {
+          const adminPass=prompt('Confirm your admin password to reset this user\'s password:');
+          if(!adminPass){
+            toast('⚠ Profile saved, but password not changed.','warn');
+          } else {
+            try{
+              const r=await sb.invoke('atp-set-password',{mode:'admin_set',adminUsername:currentUser.username,adminPassword:adminPass,targetUserId:id,newPassword:newPass,forceFirstLogin:updates.is_first_login!==false});
+              if(r&&r.error){toast('⚠ Profile saved, but password reset failed: '+r.error,'warn');}
+            }catch(e){toast('⚠ Profile saved, but password reset failed: '+e.message,'warn');}
+          }
+        }
       }
     }
     catch(e){toast('❌ Update failed: '+e.message,'err');return;}
