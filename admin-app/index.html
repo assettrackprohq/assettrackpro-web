@@ -544,6 +544,8 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <div class="card" style="padding:14px 16px;">
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;gap:10px;">
           <div><div class="fl">Search</div><input class="fi" type="text" id="ast-search" placeholder="Name, barcode…" oninput="renderAssets()"></div>
+          <div><div class="fl">Date From</div><input class="fi" type="date" id="ast-from" onchange="renderAssets()"></div>
+          <div><div class="fl">Date To</div><input class="fi" type="date" id="ast-to" onchange="renderAssets()"></div>
           <div><div class="fl">Status</div><select class="fi" id="ast-status" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Category</div><select class="fi" id="ast-cat" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Department</div><select class="fi" id="ast-dept" onchange="renderAssets()"><option value="">All</option></select></div>
@@ -3743,6 +3745,8 @@ function renderAssets(){
   var apv=(document.getElementById('ast-approval')||{}).value||'';
   var proj=(document.getElementById('ast-project')||{}).value||'';
   var regby=(document.getElementById('ast-regby')||{}).value||'';
+  var from=(document.getElementById('ast-from')||{}).value||'';
+  var to=(document.getElementById('ast-to')||{}).value||'';
   var scopedAssets=activeCompanyId?allAssets.filter(function(a){return a.company_id===activeCompanyId;}):allAssets;
   var filtered=scopedAssets.filter(function(a){
     var mq=!q||a.name.toLowerCase().includes(q.toLowerCase())||a.barcode.toLowerCase().includes(q.toLowerCase());
@@ -3750,7 +3754,9 @@ function renderAssets(){
     var ma=!apv||(a.approval_status||'pending')===apv;
     var mp=!proj||(a.project_id||'')=== proj;
     var mr=!regby||a.registered_by===regby;
-    return mq&&ms&&mc&&md&&ma&&mp&&mr;
+    var mf=!from||!a.created_at||a.created_at>=from;
+    var mt=!to||!a.created_at||a.created_at<=to+'T23:59:59';
+    return mq&&ms&&mc&&md&&ma&&mp&&mr&&mf&&mt;
   });
   var tbody=document.getElementById('assets-tbody');var empty=document.getElementById('assets-empty');
   var selAll=document.getElementById('assets-select-all');if(selAll)selAll.checked=false;
@@ -3801,80 +3807,6 @@ function renderAssets(){
 }
 
 function openAddAsset(){toast('Use the Field App to register assets. Admin can edit existing assets.','info');}
-
-// ── Asset Approval Workflow ───────────────────────────────────────────────────
-async function approveAsset(id){
-  var a=allAssets.find(function(x){return x.id===id;});if(!a)return;
-  var ts=new Date().toISOString();
-  var updates={approval_status:'approved',approved_by:currentUser.username,approved_at:ts,approval_comment:null};
-  if(CONFIGURED){try{await sb.update('assets',id,updates);}catch(e){toast('Approve failed: '+e.message,'err');return;}}
-  Object.assign(a,updates);toast('Approved: '+a.name,'ok');renderAssets();refreshDash();
-  if(CONFIGURED){try{await sb.insert('audit_log',{asset_id:id,company_id:a.company_id,barcode:a.barcode,action:'APPROVED',changes:JSON.stringify(updates),audited_by:currentUser.username,audited_at:ts,notes:'Approved by '+currentUser.username});}catch(e){}}
-}
-
-function openRejectModal(id){
-  window._pendingRejectId=id;
-  var a=allAssets.find(function(x){return x.id===id;});if(!a)return;
-  openModal('<div class="modal-ttl">&#x274C; Reject: '+a.name+'</div>'+
-    '<div style="font-size:11px;color:var(--text2);margin-bottom:14px;">Barcode: <strong style="color:var(--acc);font-family:monospace;">'+a.barcode+'</strong> &nbsp;&middot;&nbsp; By: <strong>'+(a.registered_by||'&mdash;')+'</strong></div>'+
-    '<div class="fg"><div class="fl">Rejection Reason <span class="req">REQUIRED</span></div>'+
-    '<textarea class="reject-modal-ta" id="reject-comment-inp" placeholder="Describe what needs to be corrected. The field officer will see this message."></textarea></div>'+
-    '<div class="modal-acts"><button class="act-btn btn-s" onclick="closeModal()">Cancel</button><button class="act-btn btn-d" onclick="confirmReject(window._pendingRejectId)">&#x274C; Confirm Rejection</button></div>');
-  setTimeout(function(){var t=document.getElementById('reject-comment-inp');if(t)t.focus();},120);
-}
-
-async function confirmReject(id){
-  var inp=document.getElementById('reject-comment-inp');
-  var comment=inp?inp.value.trim():'';
-  if(!comment){toast('Please enter a rejection reason','err');return;}
-  var a=allAssets.find(function(x){return x.id===id;});if(!a)return;
-  var ts=new Date().toISOString();
-  var updates={approval_status:'rejected',approved_by:currentUser.username,approved_at:ts,approval_comment:comment};
-  if(CONFIGURED){try{await sb.update('assets',id,updates);}catch(e){toast('Reject failed: '+e.message,'err');return;}}
-  Object.assign(a,updates);closeModal();toast('Rejected: '+a.name,'warn');renderAssets();refreshDash();
-  if(CONFIGURED){try{await sb.insert('audit_log',{asset_id:id,company_id:a.company_id,barcode:a.barcode,action:'REJECTED',changes:JSON.stringify(updates),audited_by:currentUser.username,audited_at:ts,notes:'Reason: '+comment});}catch(e){}}
-}
-
-async function bulkApproveAssets(){
-  var ids=[...document.querySelectorAll('.asset-cb:checked')].map(function(cb){return cb.dataset.id;});
-  if(!ids.length){toast('No assets selected','err');return;}
-  if(!confirm('Approve '+ids.length+' asset(s)?'))return;
-  var ts=new Date().toISOString();var done=0;
-  for(var i=0;i<ids.length;i++){
-    var a=allAssets.find(function(x){return x.id===ids[i];});if(!a)continue;
-    var u={approval_status:'approved',approved_by:currentUser.username,approved_at:ts,approval_comment:null};
-    if(CONFIGURED){try{await sb.update('assets',ids[i],u);}catch(e){continue;}}
-    Object.assign(a,u);done++;
-  }
-  toast(done+' asset(s) approved','ok');clearAssetSelection();renderAssets();refreshDash();
-}
-
-async function bulkRejectAssets(){
-  var ids=[...document.querySelectorAll('.asset-cb:checked')].map(function(cb){return cb.dataset.id;});
-  if(!ids.length){toast('No assets selected','err');return;}
-  window._bulkRejectIds=ids;
-  openModal('<div class="modal-ttl">&#x274C; Reject '+ids.length+' Asset(s)</div>'+
-    '<div style="font-size:12px;color:var(--text2);margin-bottom:14px;">One rejection reason will be sent to all '+ids.length+' selected asset(s).</div>'+
-    '<div class="fg"><div class="fl">Rejection Reason <span class="req">REQUIRED</span></div>'+
-    '<textarea class="reject-modal-ta" id="bulk-reject-comment" placeholder="Describe what needs to be corrected."></textarea></div>'+
-    '<div class="modal-acts"><button class="act-btn btn-s" onclick="closeModal()">Cancel</button><button class="act-btn btn-d" onclick="confirmBulkReject(window._bulkRejectIds)">&#x274C; Reject All '+ids.length+'</button></div>');
-  setTimeout(function(){var t=document.getElementById('bulk-reject-comment');if(t)t.focus();},120);
-}
-
-async function confirmBulkReject(ids){
-  var inp=document.getElementById('bulk-reject-comment');
-  var comment=inp?inp.value.trim():'';
-  if(!comment){toast('Please enter a rejection reason','err');return;}
-  var ts=new Date().toISOString();var done=0;
-  for(var i=0;i<ids.length;i++){
-    var a=allAssets.find(function(x){return x.id===ids[i];});if(!a)continue;
-    var u={approval_status:'rejected',approved_by:currentUser.username,approved_at:ts,approval_comment:comment};
-    if(CONFIGURED){try{await sb.update('assets',ids[i],u);}catch(e){continue;}}
-    Object.assign(a,u);done++;
-  }
-  closeModal();toast(done+' asset(s) rejected','warn');clearAssetSelection();renderAssets();refreshDash();
-}
-
 
 // ── Asset Approval Workflow ────────────────────────────────────────────────────
 async function approveAsset(id){
