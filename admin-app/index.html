@@ -542,13 +542,14 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <div class="apv-panel" id="apv-pending-banner" style="cursor:pointer;" title="Click to review pending assets" onclick="show('assets');document.getElementById('ast-approval').value='pending';renderAssets();"><div class="apv-panel-ttl">🕐 Assets Pending Review <span style="font-size:10px;font-weight:700;opacity:.7;margin-left:6px;">→ Review Now</span></div><div class="apv-panel-count" id="apv-pending-count"></div></div>
       <!-- Filters -->
       <div class="card" style="padding:14px 16px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;gap:10px;">
           <div><div class="fl">Search</div><input class="fi" type="text" id="ast-search" placeholder="Name, barcode…" oninput="renderAssets()"></div>
           <div><div class="fl">Status</div><select class="fi" id="ast-status" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Category</div><select class="fi" id="ast-cat" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Department</div><select class="fi" id="ast-dept" onchange="renderAssets()"><option value="">All</option></select></div>
           <div><div class="fl">Project</div><select class="fi" id="ast-project" onchange="renderAssets()"><option value="">All Projects</option></select></div>
           <div><div class="fl">Approval</div><select class="fi" id="ast-approval" onchange="renderAssets()"><option value="">All</option><option value="pending">🕐 Pending</option><option value="approved">✅ Approved</option><option value="rejected">❌ Rejected</option></select></div>
+          <div><div class="fl">Registered By</div><select class="fi" id="ast-regby" onchange="renderAssets()"><option value="">All Users</option></select></div>
         </div>
       </div>
       <!-- Bulk action bar — shown when assets are selected -->
@@ -3741,13 +3742,15 @@ function renderAssets(){
   var dept=(document.getElementById('ast-dept')||{}).value||'';
   var apv=(document.getElementById('ast-approval')||{}).value||'';
   var proj=(document.getElementById('ast-project')||{}).value||'';
+  var regby=(document.getElementById('ast-regby')||{}).value||'';
   var scopedAssets=activeCompanyId?allAssets.filter(function(a){return a.company_id===activeCompanyId;}):allAssets;
   var filtered=scopedAssets.filter(function(a){
     var mq=!q||a.name.toLowerCase().includes(q.toLowerCase())||a.barcode.toLowerCase().includes(q.toLowerCase());
     var ms=!st||a.status===st;var mc=!cat||a.category===cat;var md=!dept||a.department===dept;
     var ma=!apv||(a.approval_status||'pending')===apv;
     var mp=!proj||(a.project_id||'')=== proj;
-    return mq&&ms&&mc&&md&&ma&&mp;
+    var mr=!regby||a.registered_by===regby;
+    return mq&&ms&&mc&&md&&ma&&mp&&mr;
   });
   var tbody=document.getElementById('assets-tbody');var empty=document.getElementById('assets-empty');
   var selAll=document.getElementById('assets-select-all');if(selAll)selAll.checked=false;
@@ -3759,6 +3762,15 @@ function renderAssets(){
     const curVal=projSel.value;
     projSel.innerHTML='<option value="">All Projects</option>'+
       allProjects.filter(p=>p.status!=='archived').map(p=>`<option value="${p.id}"${p.id===curVal?' selected':''}>${p.name}</option>`).join('');
+  }
+
+  // Populate registered-by filter dropdown (from the company-scoped set, not the currently filtered subset)
+  const regbySel=document.getElementById('ast-regby');
+  if(regbySel){
+    const curRegVal=regbySel.value;
+    const regUsers=[...new Set(scopedAssets.map(function(a){return a.registered_by;}).filter(Boolean))].sort();
+    regbySel.innerHTML='<option value="">All Users</option>'+
+      regUsers.map(u=>`<option value="${u}"${u===curRegVal?' selected':''}>${u}</option>`).join('');
   }
 
   if(!filtered.length){tbody.innerHTML='';empty.style.display='block';return;}
