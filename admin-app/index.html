@@ -1079,6 +1079,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           <div class="fg"><div class="fl">Location</div><select class="fi" id="rpt-loc"><option value="">All Locations</option></select></div>
           <div class="fg"><div class="fl">Department</div><select class="fi" id="rpt-dept"><option value="">All Departments</option></select></div>
           <div class="fg"><div class="fl">Project</div><select class="fi" id="rpt-project"><option value="">All Projects</option></select></div>
+          <div class="fg"><div class="fl">Registered By</div><select class="fi" id="rpt-regby"><option value="">All Users</option></select></div>
         </div>
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-s act-btn" onclick="populateReportFilterDropdowns()">🔄 Refresh Lists</button>
@@ -4700,6 +4701,7 @@ function getFilteredForExport(){
   const loc=(document.getElementById('rpt-loc')||{}).value||'';
   const dept=(document.getElementById('rpt-dept')||{}).value||'';
   const proj=(document.getElementById('rpt-project')||{}).value||'';
+  const regby=(document.getElementById('rpt-regby')||{}).value||'';
   const wsAssets=activeCompanyId?allAssets.filter(a=>a.company_id===activeCompanyId||!a.company_id):allAssets;
   return wsAssets.filter(a=>{
     if(st&&a.status!==st)return false;
@@ -4709,6 +4711,7 @@ function getFilteredForExport(){
     if(loc&&a.location!==loc)return false;
     if(dept&&a.department!==dept)return false;
     if(proj&&(a.project_id||'')!==proj)return false;
+    if(regby&&(a.registered_by||'')!==regby)return false;
     return true;
   });
 }
@@ -4720,14 +4723,16 @@ function populateReportFilterDropdowns(){
   const locEl=document.getElementById('rpt-loc');
   const deptEl=document.getElementById('rpt-dept');
   const projEl=document.getElementById('rpt-project');
+  const regbyEl=document.getElementById('rpt-regby');
   if(locEl){locEl.innerHTML='<option value="">All Locations</option>'+locs.map(l=>`<option value="${l}">${l}</option>`).join('');}
   if(deptEl){deptEl.innerHTML='<option value="">All Departments</option>'+depts.map(d=>`<option value="${d}">${d}</option>`).join('');}
   if(projEl){projEl.innerHTML='<option value="">All Projects</option>'+allProjects.filter(p=>p.status!=='archived').map(p=>`<option value="${p.id}">${p.name}</option>`).join('');}
+  if(regbyEl){const users=[...new Set(wsAssets.map(a=>a.registered_by).filter(Boolean))].sort();regbyEl.innerHTML='<option value="">All Users</option>'+users.map(u=>`<option value="${u}">${u}</option>`).join('');}
 }
 
 function clearReportFilters(){
   ['rpt-from','rpt-to','rpt-barcode'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
-  ['rpt-status','rpt-loc','rpt-dept','rpt-project'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['rpt-status','rpt-loc','rpt-dept','rpt-project','rpt-regby'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   toast('Filters cleared','ok');
 }
 
