@@ -5847,6 +5847,15 @@ document.addEventListener('DOMContentLoaded',function(){
 // ══════════════════════════════════════════════════════
 let toastT;
 function toast(msg,type=''){const el=document.getElementById('toast-el');if(!el)return;el.textContent=msg;el.className='toast '+type+' show';clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),3000);}
+// Lightweight client-side diagnostic logger. Was called from saveCompanyConfig/importAsset error
+// paths but never defined anywhere — those calls threw a silent ReferenceError instead of logging.
+window._clientErrorLog=window._clientErrorLog||[];
+function logErr(context,message,extra){
+  const entry={context:context||'unknown',message:message||'',extra:extra||'',at:new Date().toISOString()};
+  window._clientErrorLog.push(entry);
+  if(window._clientErrorLog.length>200)window._clientErrorLog.shift();
+  console.error('['+entry.context+']',entry.message,entry.extra||'');
+}
 
 // ── CUSTOM FIELDS ──────────────────────────────────────────────────────
 let customFields = [];
@@ -7242,7 +7251,7 @@ async function refreshAssetRegister(){
     if(Array.isArray(fresh)){
       allAssets=allAssets.filter(a=>a.company_id!==activeCompanyId).concat(fresh);
       renderAssets();
-      updateDashboardKPIs();
+      refreshDash();
       toast('Asset register refreshed','ok');
     }
   }catch(e){toast('Refresh failed: '+e.message,'err');}
