@@ -1234,7 +1234,11 @@ function completeLogin(){
   const activeProjects=userProjects.filter(p=>p.status==='active');
   if(activeProjects.length===0){
     currentProjectId=null; currentProjectName=null;
-    goToApp();
+    // No active project assigned — do NOT let the user into the app.
+    // showProjectSelector() already renders "No active projects assigned to you.
+    // Contact your administrator." for this exact case, and its Log Out button
+    // remains available, so this is a real block, not a dead end.
+    showProjectSelector();
   } else if(activeProjects.length===1){
     currentProjectId=activeProjects[0].id;
     currentProjectName=activeProjects[0].name;
@@ -2767,7 +2771,10 @@ function renderSpool(){
     const th=a.photos&&a.photos[0]
       ?'<img class="aud-th" src="'+a.photos[0]+'">'
       :'<div class="aud-th-ph">'+(CAT_EMOJI[a.category]||'📦')+'</div>';
-    const editBtn=canEdit
+    // Editing rule: an unsynced capture hasn't reached the cloud/admin review yet, so it's
+    // still just a local draft — always editable. Once synced, editing is only available
+    // after an admin has actively rejected it; approved or pending (already synced) are locked.
+    const editBtn=(canEdit && (!a._synced || a.approval_status==='rejected'))
       ?'<button onclick="spoolEditAsset(\''+a.id+'\')" style="background:var(--surf2);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 9px;font-size:9px;cursor:pointer;font-family:Arial,Helvetica,sans-serif;margin-left:5px;">Edit</button>'
       :'';
     const delBtn=canDelete
@@ -2799,6 +2806,126 @@ function renderSpool(){
       +editBtn+delBtn
       +'</div></div>';
   }).join('');
+}
+
+// Edit — opens the edit overlay pre-filled with this session asset's current values.
+function spoolEditAsset(id){
+  const a=sessionAssets.find(x=>x.id===id);
+  if(!a){toast('Asset not found in this session','err');return;}
+  // Defense in depth: enforce the same rule as the button visibility, in case this is
+  // ever called from somewhere other than the rendered Edit button. Unsynced assets are
+  // still just a local draft — the review workflow only applies once something is synced.
+  if(a._synced){
+    if(a.approval_status==='approved'){
+      toast('This asset is already approved and can no longer be edited','err');return;
+    }
+    if((a.approval_status||'pending')==='pending'){
+      toast('Pending assets can only be edited if rejected — wait for review','err');return;
+    }
+  }
+  document.getElementById('se-id').value=a.id;
+  document.getElementById('se-name').value=a.name||'';
+  document.getElementById('se-category').value=a.category||'';
+  document.getElementById('se-subcategory').value=a.sub_category||'';
+  document.getElementById('se-location').value=a.location||'';
+  document.getElementById('se-department').value=a.department||'';
+  document.getElementById('se-condition').value=a.condition||'';
+  document.getElementById('se-custodian').value=a.custodian||'';
+  document.getElementById('se-serial').value=a.serial||'';
+  document.getElementById('se-notes').value=a.notes||'';
+  document.getElementById('se-err').textContent='';
+  const note=document.getElementById('se-resubmit-note');
+  if(note){
+    if(!a._synced){
+      note.textContent='☁️ Not yet synced — your changes will be included when it uploads.';
+    } else {
+      note.textContent='🔄 Saving will resubmit this asset for approval.';
+    }
+  }
+  document.getElementById('spool-edit-overlay').style.display='flex';
+}
+
+function closeSpoolEditModal(){
+  document.getElementById('spool-edit-overlay').style.display='none';
+}
+
+// Save — updates the in-memory session asset, plus either the cloud record (if already
+// synced) or the pending offline queue entry (if not yet synced), so an edit before sync
+// is reflected in what actually gets uploaded later.
+async function spoolSaveEditedAsset(){
+  const id=document.getElementById('se-id').value;
+  const a=sessionAssets.find(x=>x.id===id);
+  if(!a){toast('Asset not found in this session','err');closeSpoolEditModal();return;}
+  const name=document.getElementById('se-name').value.trim();
+  if(!name){document.getElementById('se-err').textContent='Asset name is required.';return;}
+
+  const patch={
+    name,
+    category:document.getElementById('se-category').value.trim(),
+    sub_category:document.getElementById('se-subcategory').value.trim(),
+    location:document.getElementById('se-location').value.trim(),
+    department:document.getElementById('se-department').value.trim(),
+    condition:document.getElementById('se-condition').value.trim(),
+    custodian:document.getElementById('se-custodian').value.trim(),
+    serial:document.getElementById('se-serial').value.trim(),
+    notes:document.getElementById('se-notes').value.trim(),
+  };
+
+  // Editing is only reachable from a rejected asset — treat a correction as a resubmission:
+  // send it back to pending review rather than leaving it marked Rejected with a stale comment.
+  if(a.approval_status==='rejected'){
+    patch.approval_status='pending';
+    patch.approval_comment=null;
+    patch.approved_by=null;
+    patch.approved_at=null;
+  }
+
+  Object.assign(a,patch);
+
+  if(a._synced){
+    if(CONFIGURED){
+      try{ await sb.update('assets',id,sb.cleanAsset(patch)); }
+      catch(e){ toast('Saved locally — cloud update failed, will not retry automatically','err'); }
+    }
+  } else {
+    try{
+      let q=JSON.parse(localStorage.getItem('atp_sync_queue')||'[]');
+      const qi=q.findIndex(x=>x.id===id);
+      if(qi>-1){ Object.assign(q[qi],patch); localStorage.setItem('atp_sync_queue',JSON.stringify(q)); }
+    }catch(e){}
+  }
+
+  closeSpoolEditModal();
+  renderSpool();
+  toast('Asset updated ✓','ok');
+}
+
+// Delete — per confirmed design: if already synced, only remove from this session's local
+// view (the cloud record is left untouched); if still pending sync, remove it entirely so
+// it never reaches the cloud.
+function spoolDeleteAsset(id){
+  const idx=sessionAssets.findIndex(x=>x.id===id);
+  if(idx===-1){toast('Asset not found in this session','err');return;}
+  const a=sessionAssets[idx];
+  const synced=!!a._synced;
+  const msg=synced
+    ? 'Remove "'+a.name+'" from this session view? The cloud record will NOT be deleted.'
+    : 'Delete "'+a.name+'"? It has not synced yet — this removes it completely and it will never be uploaded.';
+  if(!confirm(msg))return;
+
+  sessionAssets.splice(idx,1);
+
+  if(!synced){
+    try{
+      let q=JSON.parse(localStorage.getItem('atp_sync_queue')||'[]');
+      q=q.filter(x=>x.id!==id);
+      localStorage.setItem('atp_sync_queue',JSON.stringify(q));
+    }catch(e){}
+    updateSyncBadge();
+  }
+
+  renderSpool();
+  toast(synced?'Removed from session view (cloud record kept)':'Deleted','ok');
 }
 
 function spoolCSV(){
@@ -3192,6 +3319,46 @@ function toggleTheme(){
     </div>
     <div class="fcp-err" id="fcp-err"></div>
     <button onclick="commitFirstLoginPassword()" style="width:100%;padding:14px;border-radius:12px;background:linear-gradient(135deg,#0077cc,#005fa3);color:#fff;font-family:var(--fh);font-size:15px;font-weight:900;border:none;cursor:pointer;">Set Password & Continue →</button>
+  </div>
+</div>
+
+<!-- ── Spool Edit Asset Overlay ─────────────────────────── -->
+<div id="spool-edit-overlay" style="display:none;position:fixed;inset:0;background:rgba(10,30,56,.55);z-index:900;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--surf);border-radius:var(--r);max-width:440px;width:100%;max-height:88vh;overflow-y:auto;padding:22px;">
+    <div style="font-family:var(--fh);font-weight:900;font-size:16px;color:var(--text);margin-bottom:6px;">✏️ Edit Captured Asset</div>
+    <div id="se-resubmit-note" style="font-size:11px;color:var(--acc4);font-weight:700;margin-bottom:14px;">🔄 Saving will resubmit this asset for approval.</div>
+    <input type="hidden" id="se-id">
+    <div style="display:grid;gap:10px;">
+      <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">ASSET NAME</div>
+        <input class="fi" id="se-name" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">CATEGORY</div>
+          <input class="fi" id="se-category" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+        <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">SUB-CATEGORY</div>
+          <input class="fi" id="se-subcategory" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">LOCATION</div>
+          <input class="fi" id="se-location" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+        <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">DEPARTMENT</div>
+          <input class="fi" id="se-department" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">CONDITION</div>
+          <input class="fi" id="se-condition" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+        <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">CUSTODIAN</div>
+          <input class="fi" id="se-custodian" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+      </div>
+      <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">SERIAL NO.</div>
+        <input class="fi" id="se-serial" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;"></div>
+      <div><div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:4px;">NOTES</div>
+        <textarea id="se-notes" style="width:100%;background:var(--surf2);border:2px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);font-size:13px;font-weight:700;outline:none;min-height:60px;font-family:var(--fb);"></textarea></div>
+    </div>
+    <div id="se-err" style="color:var(--acc3);font-size:11px;font-weight:700;margin-top:10px;"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button onclick="closeSpoolEditModal()" style="flex:1;padding:12px;border-radius:10px;background:var(--surf2);border:2px solid var(--border);color:var(--text2);font-weight:700;font-size:13px;cursor:pointer;">Cancel</button>
+      <button onclick="spoolSaveEditedAsset()" style="flex:1;padding:12px;border-radius:10px;background:linear-gradient(135deg,#0077cc,#005fa3);border:none;color:#fff;font-weight:900;font-size:13px;cursor:pointer;">Save Changes</button>
+    </div>
   </div>
 </div>
 
