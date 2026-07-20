@@ -2,7 +2,7 @@
       "relation": ["delegate_permission/common.handle_all_urls"],
       "target": {
         "namespace": "android_app",
-        "package_name": "app.vercel.assettrackpro_web.twa",
-        "sha256_cert_fingerprints": ["49:F2:9C:0C:26:42:5E:CA:14:2F:D8:AD:C8:E9:9B:E8:7B:DA:F9:F2:8B:D8:92:88:A1:28:AF:26:59:49:3D:B7"]
+        "package_name": "com.skyrit.assettrackpro",
+        "sha256_cert_fingerprints": ["97:70:0C:48:00:2B:A3:A0:B2:11:80:5F:2F:12:8B:60:A9:AB:B5:97:CF:82:14:5F:B8:4E:F0:CE:4B:62:13:3A"]
       }
     }]
