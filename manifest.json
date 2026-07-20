@@ -28,5 +28,35 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/screenshot-1-login.jpg",
+      "sizes": "576x1280",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Sign in to your field operations account"
+    },
+    {
+      "src": "/screenshots/screenshot-2-select-project.jpg",
+      "sizes": "576x1280",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Select the project you're working on"
+    },
+    {
+      "src": "/screenshots/screenshot-3-dashboard.jpg",
+      "sizes": "576x1280",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Field operations dashboard with quick actions"
+    },
+    {
+      "src": "/screenshots/screenshot-4-register-asset.jpg",
+      "sizes": "573x1142",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Scan barcode and register a new asset"
+    }
   ]
 }
