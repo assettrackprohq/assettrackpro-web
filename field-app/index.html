@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+<head <link rel="manifest" href="/manifest.json">
+     <meta name="theme-color" content="#0077cc">
+     <link rel="apple-touch-icon" href="/icons/icon-192.png">>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>AssetTrackPro — Field</title>
@@ -3361,6 +3363,14 @@ function toggleTheme(){
     </div>
   </div>
 </div>
-
+<script>
+       if ("serviceWorker" in navigator) {
+         window.addEventListener("load", () => {
+           navigator.serviceWorker.register("/sw.js").catch((err) => {
+             console.warn("Service worker registration failed:", err);
+           });
+         });
+       }
+     </script>
 </body>
 </html>
