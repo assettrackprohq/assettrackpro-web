@@ -113,8 +113,6 @@ input,select,textarea,button{font-family:var(--fb);font-weight:700;}
 .field-expiry-banner{display:none;background:rgba(255,152,0,.12);border:2px solid rgba(255,152,0,.35);border-radius:12px;padding:12px 16px;margin:0 20px 4px;text-align:center;}
 .field-expiry-banner-ttl{font-family:var(--fh);font-size:12px;font-weight:900;color:#c45c00;margin-bottom:3px;}
 .field-expiry-banner-msg{font-size:11px;color:var(--text2);line-height:1.5;}
-.ls-role{font-size:11px;color:var(--text3);text-align:center;margin-top:20px;
-  line-height:2;font-weight:400;}
 /* ── GPS STAMP ── */
 .gps-stamp{font-size:10px;color:var(--text3);margin-top:6px;font-weight:400;
   display:flex;align-items:center;gap:4px;justify-content:center;min-height:16px;}
@@ -468,7 +466,6 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
   <button class="ls-btn" onclick="doLogin()">Sign In →</button>
   <div class="ls-err" id="ls-err"></div>
   <div class="gps-stamp" id="login-gps-stamp"></div>
-  <div class="ls-role">Admin? <a href="admin.html">Go to Admin Portal →</a></div>
 </div>
 
 <!-- Project Selector Screen — shown between login and home when user has multiple projects -->
@@ -858,13 +855,29 @@ const sb = {
     return d.Key?`${SUPABASE_URL}/storage/v1/object/public/${d.Key}`:null;
   },
   async invoke(fnName, payload){
-    const r=await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`,{
-      method:'POST',
-      headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json'},
-      body:JSON.stringify(payload)
-    });
-    const body=await r.json();
-    if(!r.ok) throw new Error((body&&body.error)||JSON.stringify(body));
+    let r;
+    try{
+      r=await fetch(`${SUPABASE_URL}/functions/v1/${fnName}`,{
+        method:'POST',
+        headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify(payload)
+      });
+    }catch(fetchErr){
+      // fetch() itself threw — this is a genuine network failure (offline, DNS, timeout, unreachable)
+      throw {__network:true,message:fetchErr.message};
+    }
+    let body;
+    try{ body=await r.json(); }
+    catch(parseErr){
+      // Server responded but body wasn't valid JSON — treat as a real network/server fault, not an auth rejection
+      throw {__network:true,message:'Unexpected server response ('+r.status+')'};
+    }
+    if(!r.ok){
+      // Server responded normally (e.g. 400/401) with a structured error — this is NOT a network failure,
+      // it's an expected rejection (bad credentials, no such user, deactivated, etc). Return it so the
+      // caller's error-code mapping can show the correct message instead of a generic connection error.
+      return {error:(body&&body.error)||'unknown_error',...body};
+    }
     return body;
   }
 };
@@ -1123,12 +1136,20 @@ async function doLogin(){
       let res;
       try{res=await sb.invoke('atp-login',{username:u,password:p,portal:'field'});}
       catch(netErr){
-        hideSaving();errEl.textContent='⚠ Network error — check your connection and try again.';return;
+        hideSaving();
+        if(netErr&&netErr.__network){
+          errEl.textContent='⚠ Network error — check your connection and try again.';
+        } else {
+          errEl.textContent='⚠ Login failed — please try again.';
+        }
+        return;
       }
       if(res&&res.error){
         hideSaving();
         const msg={
+          user_not_found:'❌ No account found with that username.',
           invalid_credentials:'❌ Incorrect username or password.',
+          wrong_password:'🔑 Incorrect password. Try again.',
           account_deactivated:'⛔ Account deactivated — contact your administrator.',
           wrong_portal_admin:'⛔ Admin accounts must use the Admin Portal.'
         }[res.error]||'⚠ Login failed — please try again.';
@@ -1161,7 +1182,7 @@ async function doLogin(){
 
     completeLogin();
   }catch(e){
-    hideSaving();errEl.textContent='⚠ Connection error — '+e.message;
+    hideSaving();errEl.textContent='⚠ Unexpected error — '+(e&&e.message?e.message:'please try again.');
   }
 }
 
