@@ -14,7 +14,7 @@ jobs:
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
-            "https://qeqiwcypmeexihqbvweu.supabase.co/rest/v1/companies?select=id&limit=1")
+            "https://olcteqqdiycrwiveytbp.supabase.co/rest/v1/companies?select=id&limit=1")
           echo "Response code: $RESPONSE"
           if [ "$RESPONSE" != "200" ]; then
             echo "Warning: Unexpected response $RESPONSE"
