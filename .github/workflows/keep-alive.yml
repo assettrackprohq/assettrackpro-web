@@ -1,0 +1,65 @@
+name: Keep Supabase Alive
+
+# Runs every 3 days to prevent the Supabase free-tier project from
+# auto-pausing after 7 days of inactivity.
+on:
+  schedule:
+    - cron: '0 3 */3 * *'   # 03:00 UTC, every 3rd day
+  workflow_dispatch:         # allows manual "Run workflow" trigger for testing
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required secrets
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+            echo "::error::SUPABASE_URL secret is not set. Go to Settings > Secrets and variables > Actions and add it."
+            exit 1
+          fi
+          if [ -z "${{ secrets.SUPABASE_ANON_KEY }}" ]; then
+            echo "::error::SUPABASE_ANON_KEY secret is not set. Go to Settings > Secrets and variables > Actions and add it."
+            exit 1
+          fi
+          echo "Secrets present. Target host: $(echo '${{ secrets.SUPABASE_URL }}' | sed -E 's|https?://||' | cut -d/ -f1)"
+
+      - name: Ping Supabase (lightweight DB read)
+        run: |
+          set -euo pipefail
+
+          URL="${{ secrets.SUPABASE_URL }}"
+          KEY="${{ secrets.SUPABASE_ANON_KEY }}"
+
+          # Strip any trailing slash so we don't end up with a malformed
+          # double-slash URL (a common cause of curl exit code 3/6).
+          URL="${URL%/}"
+
+          echo "Pinging: $URL/rest/v1/"
+
+          HTTP_STATUS=$(curl -sS -o /tmp/response.json -w "%{http_code}" \
+            --max-time 15 \
+            --retry 3 \
+            --retry-delay 5 \
+            --retry-connrefused \
+            "$URL/rest/v1/companies?select=id&limit=1" \
+            -H "apikey: $KEY" \
+            -H "Authorization: Bearer $KEY") || {
+              echo "::error::curl failed to reach $URL — check that SUPABASE_URL points at the current production project and includes https://"
+              exit 1
+            }
+
+          echo "HTTP status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Supabase project is active (status $HTTP_STATUS)."
+          else
+            echo "::error::Unexpected HTTP status $HTTP_STATUS. Response body:"
+            cat /tmp/response.json
+            exit 1
+          fi
+
+      - name: Log run summary
+        if: always()
+        run: |
+          echo "### Keep-Alive Run — $(date -u '+%Y-%m-%d %H:%M UTC')" >> "$GITHUB_STEP_SUMMARY"
+          echo "Status: ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
