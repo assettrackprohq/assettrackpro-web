@@ -3906,14 +3906,16 @@ function openReviewDetail(id){
   var projObj=a.project_id?allProjects.find(function(p){return p.id===a.project_id;}):null;
   var canApprove=currentUser&&['admin','sub_admin','super_owner'].includes(currentUser.role);
   var apvS=a.approval_status||'pending';
-  var actionsHtml=canApprove?(
-    '<div class="modal-acts">'+
-      (apvS!=='rejected'?'<button class="act-btn btn-d" onclick="openRejectModal(\''+id+'\',true)">&#x274C; Reject</button>':'')+
-      (apvS!=='approved'?'<button class="act-btn btn-p" onclick="approveFromDetail(\''+id+'\')">&#x2705; Approve &amp; Next</button>':'')+
-    '</div>'
-  ):'';
+  var actionsHtml='<div class="modal-acts">'+
+      '<button class="act-btn btn-s" onclick="closeModal()">Close</button>'+
+      (canApprove&&apvS!=='rejected'?'<button class="act-btn btn-d" onclick="openRejectModal(\''+id+'\',true)">&#x274C; Reject</button>':'')+
+      (canApprove&&apvS!=='approved'?'<button class="act-btn btn-p" onclick="approveFromDetail(\''+id+'\')">&#x2705; Approve &amp; Next</button>':'')+
+    '</div>';
   openModal(
-    '<div class="modal-ttl">'+a.name+'</div>'+
+    '<div class="modal-ttl" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">'+
+      '<span>'+a.name+'</span>'+
+      '<button onclick="closeModal()" title="Close" style="background:none;border:none;cursor:pointer;font-size:22px;line-height:1;color:var(--text3);padding:0;">&times;</button>'+
+    '</div>'+
     '<div style="font-size:11px;color:var(--text2);margin-bottom:14px;">Barcode: <strong style="color:var(--acc);font-family:monospace;">'+a.barcode+'</strong></div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;font-size:12px;margin-bottom:16px;">'+
       '<div><span style="color:var(--text3);">Category</span><br><strong>'+(a.category||'--')+(a.sub_category?' &gt; '+a.sub_category:'')+'</strong></div>'+
@@ -3971,12 +3973,16 @@ function lbNext(){_lbIdx=(_lbIdx+1)%_lbPhotos.length;renderLightbox();}
 function closeLightbox(){document.getElementById('lightbox-overlay').classList.remove('open');}
 document.addEventListener('DOMContentLoaded',function(){
   var lo=document.getElementById('lightbox-overlay');
+  var mo=document.getElementById('modal-overlay');
   if(lo)lo.addEventListener('click',function(e){if(e.target===lo)closeLightbox();});
   document.addEventListener('keydown',function(e){
-    if(!lo||!lo.classList.contains('open'))return;
-    if(e.key==='Escape')closeLightbox();
-    if(e.key==='ArrowLeft')lbPrev();
-    if(e.key==='ArrowRight')lbNext();
+    if(lo&&lo.classList.contains('open')){
+      if(e.key==='Escape')closeLightbox();
+      if(e.key==='ArrowLeft')lbPrev();
+      if(e.key==='ArrowRight')lbNext();
+      return;
+    }
+    if(e.key==='Escape'&&mo&&mo.classList.contains('open'))closeModal();
   });
 });
 
