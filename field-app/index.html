@@ -1756,7 +1756,37 @@ function rmP(e,i){
 
 // Image compression — this is the key fix for the storage problem
 // Resizes to maxWidth and compresses to JPEG quality
+//
+// IMPORTANT: decodes directly from the File/Blob via createImageBitmap()
+// wherever supported. The old FileReader->dataURL->Image path forced the
+// browser to hold the FULL-RESOLUTION camera photo in memory twice over
+// (once as a bloated base64 string, once as a decoded pixel bitmap) before
+// any resizing happened — on a 12MP+ phone camera that's commonly 50-100MB
+// spiked synchronously the instant a photo is taken, which is what was
+// crashing the app on direct capture (gallery photos happened to dodge it
+// more often, but ran the same risky path).
 function compressImage(file,maxWidth,quality,cb){
+  if(window.createImageBitmap){
+    createImageBitmap(file,{imageOrientation:'from-image'}).then(bitmap=>{
+      const ratio=Math.min(1,maxWidth/bitmap.width);
+      const w=Math.round(bitmap.width*ratio);
+      const h=Math.round(bitmap.height*ratio);
+      const canvas=document.createElement('canvas');
+      canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(bitmap,0,0,w,h);
+      bitmap.close(); // release the full-res decode immediately, don't wait on GC
+      canvas.toBlob(blob=>{
+        const fr=new FileReader();
+        fr.onload=e2=>cb({blob,dataUrl:e2.target.result});
+        fr.readAsDataURL(blob); // this read is on the small resized blob, so it's cheap
+      },'image/jpeg',quality);
+    }).catch(()=>{ _compressImageLegacy(file,maxWidth,quality,cb); });
+  }else{
+    _compressImageLegacy(file,maxWidth,quality,cb);
+  }
+}
+// Fallback path for browsers without createImageBitmap support (rare on modern mobile)
+function _compressImageLegacy(file,maxWidth,quality,cb){
   const reader=new FileReader();
   reader.onload=ev=>{
     const img=new Image();
@@ -1768,7 +1798,6 @@ function compressImage(file,maxWidth,quality,cb){
       canvas.width=w;canvas.height=h;
       canvas.getContext('2d').drawImage(img,0,0,w,h);
       canvas.toBlob(blob=>{
-        // Read directly without creating an object URL (avoids memory leak)
         const fr=new FileReader();
         fr.onload=e2=>cb({blob,dataUrl:e2.target.result});
         fr.readAsDataURL(blob);
