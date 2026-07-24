@@ -935,6 +935,26 @@ async function checkRejectedAssets(){
   }catch(e){}
 }
 
+// Ensures a <select> shows and keeps a given value even if that value
+// isn't among its current <option>s (e.g. the field agent's active
+// project/taxonomy or assigned locations changed since the asset was
+// first submitted). Without this, select.value = X silently fails when
+// no matching <option> exists, leaving the field blank — which is what
+// was wiping out category/location on the resubmit screen.
+function _ensureSelValue(sel,val){
+  if(!sel)return;
+  val=val||'';
+  if(!val){sel.value='';return;}
+  const has=Array.prototype.some.call(sel.options,o=>o.value===val);
+  if(!has){
+    const opt=document.createElement('option');
+    opt.value=val;opt.textContent=val+' (originally submitted)';
+    sel.appendChild(opt);
+  }
+  sel.value=val;
+  sel.disabled=false;
+}
+
 async function openResubmitAsset(id){
   try{
     var asset=null;
@@ -950,14 +970,17 @@ async function openResubmitAsset(id){
       var bcBtn=document.querySelector('#s-register .bcbtn');
       if(bcBtn){bcBtn.disabled=true;bcBtn.style.opacity='.4';bcBtn.title='Barcode locked during resubmission';}
       var catEl=document.getElementById('f-cat');
-      if(catEl){catEl.value=asset.category||'';onCat();}
+      _ensureSelValue(catEl,asset.category);
+      onCat(); // rebuilds sub-category options for the selected category
       var subEl=document.getElementById('f-subcat');
-      if(subEl){subEl.value=asset.sub_category||'';onSubcat();}
-      var nmEl=document.getElementById('f-name');if(nmEl)nmEl.value=asset.name||'';
-      var locEl=document.getElementById('f-loc');if(locEl)locEl.value=asset.location||'';
-      var deptEl=document.getElementById('f-dept');if(deptEl)deptEl.value=asset.department||'';
-      var stEl=document.getElementById('f-status');if(stEl)stEl.value=asset.status||'';
-      var condEl=document.getElementById('f-cond');if(condEl)condEl.value=asset.condition||'';
+      _ensureSelValue(subEl,asset.sub_category);
+      onSubcat(); // rebuilds asset-name options for the selected sub-category
+      var nmEl=document.getElementById('f-name');
+      _ensureSelValue(nmEl,asset.name);
+      var locEl=document.getElementById('f-loc');if(locEl)_ensureSelValue(locEl,asset.location);
+      var deptEl=document.getElementById('f-dept');if(deptEl)_ensureSelValue(deptEl,asset.department);
+      var stEl=document.getElementById('f-status');if(stEl)_ensureSelValue(stEl,asset.status);
+      var condEl=document.getElementById('f-cond');if(condEl)_ensureSelValue(condEl,asset.condition);
       var serialEl=document.getElementById('f-serial');if(serialEl)serialEl.value=asset.serial||'';
       var custEl=document.getElementById('f-cust');if(custEl)custEl.value=asset.custodian||'';
       var notesEl=document.getElementById('f-notes');if(notesEl)notesEl.value=asset.notes||'';
@@ -1767,18 +1790,18 @@ function rmP(e,i){
 // more often, but ran the same risky path).
 function compressImage(file,maxWidth,quality,cb){
   if(window.createImageBitmap){
-    createImageBitmap(file,{imageOrientation:'from-image'}).then(bitmap=>{
-      const ratio=Math.min(1,maxWidth/bitmap.width);
-      const w=Math.round(bitmap.width*ratio);
-      const h=Math.round(bitmap.height*ratio);
+    // resizeWidth tells the browser to decode straight to the target size
+    // where supported, so it never has to fully materialize the original
+    // 12MP+ camera resolution in memory at all -- not just resize it after.
+    createImageBitmap(file,{imageOrientation:'from-image',resizeWidth:maxWidth,resizeQuality:'medium'}).then(bitmap=>{
       const canvas=document.createElement('canvas');
-      canvas.width=w;canvas.height=h;
-      canvas.getContext('2d').drawImage(bitmap,0,0,w,h);
-      bitmap.close(); // release the full-res decode immediately, don't wait on GC
+      canvas.width=bitmap.width;canvas.height=bitmap.height;
+      canvas.getContext('2d').drawImage(bitmap,0,0);
+      bitmap.close(); // release immediately, don't wait on GC
       canvas.toBlob(blob=>{
         const fr=new FileReader();
         fr.onload=e2=>cb({blob,dataUrl:e2.target.result});
-        fr.readAsDataURL(blob); // this read is on the small resized blob, so it's cheap
+        fr.readAsDataURL(blob);
       },'image/jpeg',quality);
     }).catch(()=>{ _compressImageLegacy(file,maxWidth,quality,cb); });
   }else{
