@@ -3891,6 +3891,14 @@ var _reviewAsset=null;
 var _lbPhotos=[];
 var _lbIdx=0;
 
+function _reviewFmtDT(d){
+  if(!d)return'—';
+  try{
+    var dt=new Date(d);
+    return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){return String(d);}
+}
+
 function getPendingQueueIds(){
   var scoped=activeCompanyId?allAssets.filter(function(a){return a.company_id===activeCompanyId;}):allAssets;
   return scoped.filter(function(a){return (a.approval_status||'pending')==='pending';}).map(function(a){return a.id;});
@@ -3924,6 +3932,8 @@ function openReviewDetail(id){
       '<div><span style="color:var(--text3);">Custodian</span><br><strong>'+(a.custodian||'--')+'</strong></div>'+
       '<div><span style="color:var(--text3);">Condition</span><br><strong>'+(a.condition||'--')+'</strong></div>'+
       '<div><span style="color:var(--text3);">Registered by</span><br><strong>'+(a.registered_by||'--')+'</strong></div>'+
+      '<div><span style="color:var(--text3);">Captured</span><br><strong>'+_reviewFmtDT(a.created_at)+'</strong></div>'+
+      '<div><span style="color:var(--text3);">Last submitted</span><br><strong>'+_reviewFmtDT(a.updated_at||a.created_at)+'</strong></div>'+
       (projObj?'<div><span style="color:var(--text3);">Project</span><br><strong>📁 '+projObj.name+'</strong></div>':'')+
       '<div><span style="color:var(--text3);">Status</span><br>'+approvalBadge(a)+'</div>'+
     '</div>'+
