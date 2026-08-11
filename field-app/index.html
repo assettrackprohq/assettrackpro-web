@@ -448,6 +448,29 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
 .f3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
 @media(max-width:380px){.f3{grid-template-columns:1fr 1fr;}}
 </style>
+
+<!-- ── AUDITOR QR MODAL — styles ── -->
+<style>
+  #atpQrOverlay{display:none;position:fixed;inset:0;background:rgba(10,30,56,.55);z-index:9999;
+    align-items:center;justify-content:center;padding:16px;}
+  #atpQrOverlay.open{display:flex;}
+  #atpQrModal{background:var(--surf);border-radius:var(--r);max-width:300px;width:100%;
+    padding:22px 18px 16px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.35);
+    border:1px solid var(--border);}
+  #atpQrModal h3{font-family:var(--fh);font-weight:900;font-size:15px;margin:0 0 4px;color:var(--text);}
+  #atpQrModal .atp-qr-sub{font-size:11px;color:var(--text3);margin-bottom:14px;font-family:var(--fb);}
+  #atpQrCanvasWrap{background:#fff;border-radius:var(--r-sm);padding:14px;display:inline-flex;
+    align-items:center;justify-content:center;min-height:196px;min-width:196px;}
+  #atpQrCanvasWrap .atp-qr-loading{font-size:11px;color:#9aa5ad;font-family:var(--fb);}
+  #atpQrCanvasWrap .atp-qr-error{font-size:11px;color:var(--acc3);max-width:170px;font-family:var(--fb);}
+  #atpQrModal .atp-qr-actions{display:flex;gap:7px;margin-top:16px;}
+  #atpQrModal button{flex:1;padding:9px 10px;border-radius:var(--r-sm);border:none;
+    font-weight:700;font-size:12px;cursor:pointer;font-family:var(--fb);}
+  #atpQrPrintBtn{background:var(--g-blue);color:#fff;}
+  #atpQrCopyBtn{background:var(--surf2);color:var(--acc);border:1px solid var(--border)!important;}
+  #atpQrCloseBtn{margin-top:8px;background:transparent;color:var(--text3);font-size:11px;padding:6px;}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -798,6 +821,86 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const CONFIGURED = SUPABASE_URL !== 'YOUR_SUPABASE_URL';
 let sbSession=null; // real Supabase Auth session, set after atp-login succeeds
 function authToken(){ return (sbSession&&sbSession.access_token)?sbSession.access_token:SUPABASE_ANON_KEY; }
+
+// ── AUDITOR QR MODAL ──
+// Generates a signed, read-only audit link for a synced asset and
+// displays it as a scannable QR code. Only works for assets already
+// saved to the cloud (a._synced === true) — the lookup happens
+// against the live `assets` table, so unsynced local-only captures
+// won't resolve yet.
+const ATP_GET_QR_URL = SUPABASE_URL + '/functions/v1/get-asset-qr';
+let atpQrCurrentUrl = null;
+
+async function showAssetQrModal(asset){
+  const overlay=document.getElementById('atpQrOverlay');
+  const canvasWrap=document.getElementById('atpQrCanvasWrap');
+  const nameEl=document.getElementById('atpQrAssetName');
+  const tagEl=document.getElementById('atpQrAssetTag');
+
+  nameEl.textContent=asset.name||'Asset QR Code';
+  tagEl.textContent=asset.barcode||asset.id;
+  canvasWrap.innerHTML='<div class="atp-qr-loading">Generating…</div>';
+  atpQrCurrentUrl=null;
+  overlay.classList.add('open');
+
+  const token=authToken();
+  if(!token || token===SUPABASE_ANON_KEY){
+    canvasWrap.innerHTML='<div class="atp-qr-error">You need to be logged in to generate a QR code.</div>';
+    return;
+  }
+
+  try{
+    const resp=await fetch(ATP_GET_QR_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({asset_id:asset.id})
+    });
+    if(!resp.ok){
+      const errBody=await resp.json().catch(function(){return {};});
+      throw new Error(errBody.error||('Request failed ('+resp.status+')'));
+    }
+    const data=await resp.json();
+    atpQrCurrentUrl=data.url;
+    canvasWrap.innerHTML='';
+    new QRCode(canvasWrap,{text:data.url,width:180,height:180,correctLevel:QRCode.CorrectLevel.M});
+  }catch(err){
+    canvasWrap.innerHTML='<div class="atp-qr-error">Couldn\'t generate QR code. '+(err.message||'')+'</div>';
+  }
+}
+
+function closeAtpQrModal(){ document.getElementById('atpQrOverlay').classList.remove('open'); }
+
+document.addEventListener('DOMContentLoaded',function(){
+  const closeBtn=document.getElementById('atpQrCloseBtn');
+  const overlay=document.getElementById('atpQrOverlay');
+  const printBtn=document.getElementById('atpQrPrintBtn');
+  const copyBtn=document.getElementById('atpQrCopyBtn');
+  if(closeBtn) closeBtn.addEventListener('click',closeAtpQrModal);
+  if(overlay) overlay.addEventListener('click',function(e){ if(e.target===this) closeAtpQrModal(); });
+  if(printBtn) printBtn.addEventListener('click',function(){
+    const canvas=document.querySelector('#atpQrCanvasWrap canvas');
+    const img=document.querySelector('#atpQrCanvasWrap img');
+    const src=canvas?canvas.toDataURL():(img?img.src:null);
+    if(!src) return;
+    const assetName=document.getElementById('atpQrAssetName').textContent;
+    const assetTag=document.getElementById('atpQrAssetTag').textContent;
+    const w=window.open('','_blank','width=380,height=480');
+    w.document.write('<html><head><title>Asset Tag</title></head><body style="text-align:center;font-family:Arial,sans-serif;padding:20px;">'
+      +'<h3 style="margin-bottom:4px;">'+assetName+'</h3>'
+      +'<p style="color:#666;margin-top:0;">'+assetTag+'</p>'
+      +'<img src="'+src+'" style="width:200px;height:200px;">'
+      +'</body></html>');
+    w.document.close(); w.focus(); w.print();
+  });
+  if(copyBtn) copyBtn.addEventListener('click',function(){
+    if(!atpQrCurrentUrl) return;
+    navigator.clipboard.writeText(atpQrCurrentUrl).then(function(){
+      const original=copyBtn.textContent;
+      copyBtn.textContent='Copied!';
+      setTimeout(function(){copyBtn.textContent=original;},1500);
+    });
+  });
+});
 
 // ── Supabase REST helper (no SDK needed) ──
 const sb = {
@@ -2858,6 +2961,11 @@ function renderSpool(){
     const synced=a._synced
       ?'<span style="font-size:9px;color:var(--acc);margin-left:6px;">☁ Synced</span>'
       :'<span style="font-size:9px;color:var(--text3);margin-left:6px;">⏳ Pending sync</span>';
+    // QR only makes sense once the asset actually exists in the cloud
+    // DB — the audit link resolves against the live `assets` table.
+    const qrBtn=a._synced
+      ?'<button onclick="spoolShowAssetQr(\''+a.id+'\')" style="background:var(--surf2);color:var(--acc);border:1px solid var(--border);border-radius:7px;padding:4px 9px;font-size:9px;cursor:pointer;font-family:Arial,Helvetica,sans-serif;margin-left:5px;">QR</button>'
+      :'';
     const apvS=a.approval_status||'pending';
     const apvPill='<span class="apv-pill apv-'+apvS+'" style="margin-left:5px;">'
       +(apvS==='approved'?'&#x2705; Approved':apvS==='rejected'?'&#x274C; Rejected':'&#x1F550; Pending')+'</span>';
@@ -2878,12 +2986,21 @@ function renderSpool(){
       +'</div>'
       +'<div style="display:flex;align-items:center;">'
       +'<span class="badge '+(getStatCls(a.status))+'" style="font-size:9px;padding:3px 7px;border-radius:5px;">'+a.status+'</span>'
-      +editBtn+delBtn
+      +editBtn+delBtn+qrBtn
       +'</div></div>';
   }).join('');
 }
 
 // Edit — opens the edit overlay pre-filled with this session asset's current values.
+// Looks up the full asset by id (same pattern as spoolEditAsset) and
+// opens the QR modal — keeps the onclick attribute safe from any
+// quote characters that might appear in a free-text name/barcode.
+function spoolShowAssetQr(id){
+  const a=sessionAssets.find(x=>x.id===id);
+  if(!a){toast('Asset not found in this session','err');return;}
+  showAssetQrModal(a);
+}
+
 function spoolEditAsset(id){
   const a=sessionAssets.find(x=>x.id===id);
   if(!a){toast('Asset not found in this session','err');return;}
@@ -3436,6 +3553,20 @@ function toggleTheme(){
     </div>
   </div>
 </div>
+<!-- ── AUDITOR QR MODAL — markup ── -->
+<div id="atpQrOverlay">
+  <div id="atpQrModal">
+    <h3 id="atpQrAssetName">Asset QR Code</h3>
+    <div class="atp-qr-sub" id="atpQrAssetTag">—</div>
+    <div id="atpQrCanvasWrap"><div class="atp-qr-loading">Generating…</div></div>
+    <div class="atp-qr-actions">
+      <button id="atpQrPrintBtn" type="button">Print</button>
+      <button id="atpQrCopyBtn" type="button">Copy Link</button>
+    </div>
+    <button id="atpQrCloseBtn" type="button">Close</button>
+  </div>
+</div>
+
 <script>
        if ("serviceWorker" in navigator) {
          window.addEventListener("load", () => {
