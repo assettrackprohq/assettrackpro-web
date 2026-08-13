@@ -45,19 +45,27 @@
       return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
+    function formatDate(value) {
+      if (!value) return '&mdash;';
+      const d = new Date(value);
+      if (isNaN(d.getTime())) return escapeHtml(value); // fall back to raw value if unparsable
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
     function renderAssetCard(asset) {
       const status = (asset.status || "").toLowerCase();
       const statusClass = status === "active" ? "" : " inactive";
       return '<div class="card">'
         + (asset.image_url ? '<img src="' + escapeHtml(asset.image_url) + '" alt="Asset photo">' : '')
         + '<div class="card-body">'
-        + '<div class="asset-id">' + escapeHtml(asset.barcode || asset.asset_id) + '</div>'
+        + '<div class="asset-id">' + escapeHtml(asset.barcode) + '</div>'
         + '<h1>' + escapeHtml(asset.description || 'Unnamed asset') + '</h1>'
         + '<span class="status-badge' + statusClass + '">' + escapeHtml(asset.status || 'Unknown') + '</span>'
         + '<div class="field-row"><span class="field-label">Department</span><span class="field-value">' + (escapeHtml(asset.department) || '&mdash;') + '</span></div>'
         + '<div class="field-row"><span class="field-label">Location</span><span class="field-value">' + (escapeHtml(asset.location) || '&mdash;') + '</span></div>'
         + '<div class="field-row"><span class="field-label">Custodian</span><span class="field-value">' + (escapeHtml(asset.custodian) || '&mdash;') + '</span></div>'
-        + '<div class="field-row"><span class="field-label">Last verified</span><span class="field-value">' + (escapeHtml(asset.last_verification_date) || '&mdash;') + '</span></div>'
+        + '<div class="field-row"><span class="field-label">Registered</span><span class="field-value">' + formatDate(asset.registered_date) + '</span></div>'
+        + '<div class="field-row"><span class="field-label">Last verified</span><span class="field-value">' + formatDate(asset.last_verification_date) + '</span></div>'
         + '<div class="footer-note">Verified against AssetTrackPro &middot; read-only audit view</div>'
         + '</div></div>';
     }
@@ -70,18 +78,18 @@
 
     async function loadAsset() {
       const params = new URLSearchParams(window.location.search);
-      const id = params.get('id');
+      const barcode = params.get('b');
       const t = params.get('t');
       const contentEl = document.getElementById('content');
 
-      if (!id || !t) {
+      if (!barcode || !t) {
         contentEl.className = '';
         contentEl.innerHTML = renderErrorBox('This link is missing required information.');
         return;
       }
 
       try {
-        const resp = await fetch(VERIFY_ASSET_API + '?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(t));
+        const resp = await fetch(VERIFY_ASSET_API + '?b=' + encodeURIComponent(barcode) + '&t=' + encodeURIComponent(t));
         const data = await resp.json();
 
         contentEl.className = '';
