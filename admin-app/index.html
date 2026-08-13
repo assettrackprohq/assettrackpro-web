@@ -352,10 +352,12 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
   #atpQrModal button{flex:1;padding:9px 10px;border-radius:var(--r-sm);border:none;
     font-weight:700;font-size:12px;cursor:pointer;font-family:var(--fb);}
   #atpQrPrintBtn{background:var(--g-blue);color:#fff;}
+  #atpQrDownloadBtn{background:var(--surf2);color:var(--acc);border:1px solid var(--border)!important;}
   #atpQrCopyBtn{background:var(--surf2);color:var(--acc);border:1px solid var(--border)!important;}
   #atpQrCloseBtn{margin-top:8px;background:transparent;color:var(--text3);font-size:11px;padding:6px;}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body>
 
@@ -420,6 +422,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <div class="sb-sect">Overview</div>
       <button class="nav-item on" onclick="show('dashboard')"><span class="ni">📊</span>Dashboard</button>
       <button class="nav-item" onclick="show('assets')"><span class="ni">📦</span>Asset Register</button>
+      <button class="nav-item" onclick="show('bulk-qr')"><span class="ni">🏷️</span>Bulk QR Codes</button>
       <button class="nav-item" onclick="show('projects')"><span class="ni">📁</span>Projects</button>
       <button class="nav-item" onclick="show('audit-mgmt')"><span class="ni">✅</span>Audit Management</button>
       <div class="sb-sect">Platform</div>
@@ -613,6 +616,70 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         </table>
         <div id="assets-empty" style="display:none;padding:30px;text-align:center;font-size:12px;color:var(--text3);">No assets found.</div>
       </div>
+    </div>
+
+    <!-- ══ BULK QR CODES ══ -->
+    <div class="panel" id="p-bulk-qr">
+      <div class="panel-hdr">
+        <div><div class="panel-ttl">🏷️ Bulk QR Codes</div><div class="panel-sub">Generate signed QR codes for pre-printed label batches — before assets are registered</div></div>
+      </div>
+
+      <div style="background:var(--surf2);border:1px solid var(--border);border-radius:var(--r-sm);padding:14px 16px;margin-bottom:18px;font-size:12px;color:var(--text2);line-height:1.5;">
+        Each QR is signed against the <strong>barcode</strong> itself, not the asset record — so codes work even for barcodes that haven't been registered in AssetTrackPro yet. When an auditor scans a QR for an unregistered barcode, they'll see "not yet registered" until you tag that asset. No data leaves this device except the barcode list itself, sent once to generate signed links.
+      </div>
+
+      <div class="f3" style="margin-bottom:18px;">
+        <button class="act-btn btn-s" id="bulkqr-mode-upload" onclick="bulkQrSetMode('upload')" style="font-weight:700;">📄 Upload CSV/Excel</button>
+        <button class="act-btn btn-s" id="bulkqr-mode-range" onclick="bulkQrSetMode('range')" style="font-weight:700;">🔢 Generate Range</button>
+      </div>
+
+      <div id="bulkqr-upload-panel">
+        <label class="fi" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;padding:28px;border:2px dashed var(--border);border-radius:var(--r-sm);cursor:pointer;background:var(--surf2);">
+          <span style="font-size:13px;font-weight:700;color:var(--text);">Click to choose a CSV or Excel file</span>
+          <span style="font-size:11px;color:var(--text3);">Needs a column containing barcodes — header can be named "Barcode" or similar</span>
+          <input type="file" id="bulkqr-file-input" accept=".csv,.xlsx,.xls" style="display:none;" onchange="bulkQrHandleFile(this.files[0])">
+        </label>
+        <div id="bulkqr-file-status" style="font-size:12px;color:var(--text3);margin-top:8px;"></div>
+      </div>
+
+      <div id="bulkqr-range-panel" style="display:none;">
+        <div class="f3">
+          <div>
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;">Prefix</label>
+            <input class="fi" type="text" id="bulkqr-range-prefix" placeholder="e.g. MTN" value="MTN">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;">Start number</label>
+            <input class="fi" type="number" id="bulkqr-range-start" value="1" min="0">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;">Count</label>
+            <input class="fi" type="number" id="bulkqr-range-count" value="100" min="1" max="2000">
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;">Digit padding (e.g. 8 → 00000001)</label>
+          <input class="fi" type="number" id="bulkqr-range-padding" value="8" min="1" max="12" style="max-width:120px;">
+        </div>
+        <button class="act-btn btn-p" style="margin-top:14px;" onclick="bulkQrGenerateRangeList()">Preview Range</button>
+      </div>
+
+      <div id="bulkqr-preview" style="display:none;margin-top:18px;">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px;">
+          <span id="bulkqr-preview-count">0</span> barcodes ready
+        </div>
+        <div id="bulkqr-preview-sample" style="font-size:11px;color:var(--text3);font-family:monospace;margin-bottom:14px;"></div>
+        <button class="act-btn btn-p" id="bulkqr-generate-btn" onclick="bulkQrRunGeneration()">Generate ZIP (QR codes + CSV)</button>
+      </div>
+
+      <div id="bulkqr-progress" style="display:none;margin-top:18px;">
+        <div style="font-size:12px;color:var(--text2);margin-bottom:6px;" id="bulkqr-progress-label">Preparing…</div>
+        <div style="background:var(--surf2);border-radius:8px;height:8px;overflow:hidden;">
+          <div id="bulkqr-progress-bar" style="background:var(--g-blue);height:100%;width:0%;transition:width .2s;"></div>
+        </div>
+      </div>
+
+      <div id="bulkqr-qr-render-area" style="position:absolute;left:-9999px;top:-9999px;"></div>
     </div>
 
     <!-- ══ PROJECTS ══ -->
@@ -1813,6 +1880,11 @@ async function showAssetQrModal(asset){
   atpQrCurrentUrl=null;
   overlay.classList.add('open');
 
+  if(!asset.barcode){
+    canvasWrap.innerHTML='<div class="atp-qr-error">This asset has no barcode on record — QR codes are generated from the barcode.</div>';
+    return;
+  }
+
   const token=authToken();
   if(!token || token===SUPABASE_ANON_KEY){
     canvasWrap.innerHTML='<div class="atp-qr-error">You need to be logged in to generate a QR code.</div>';
@@ -1823,7 +1895,7 @@ async function showAssetQrModal(asset){
     const resp=await fetch(ATP_GET_QR_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify({asset_id:asset.id})
+      body:JSON.stringify({barcode:asset.barcode})
     });
     if(!resp.ok){
       const errBody=await resp.json().catch(function(){return {};});
@@ -1849,10 +1921,195 @@ function adminShowAssetQr(id){
 
 function closeAtpQrModal(){ document.getElementById('atpQrOverlay').classList.remove('open'); }
 
+// ══════════════════════════════════════════════════════
+// BULK QR GENERATOR
+// For pre-printed label batches — barcodes exist before assets do.
+// ══════════════════════════════════════════════════════
+const BULK_GET_QR_URL = SUPABASE_URL + '/functions/v1/bulk-get-qr';
+const BULK_QR_CHUNK_SIZE = 300; // per bulk-get-qr call; function itself allows up to 2000
+let bulkQrBarcodeList = [];
+
+function bulkQrSetMode(mode){
+  document.getElementById('bulkqr-upload-panel').style.display = mode==='upload' ? '' : 'none';
+  document.getElementById('bulkqr-range-panel').style.display = mode==='range' ? '' : 'none';
+  document.getElementById('bulkqr-mode-upload').style.opacity = mode==='upload' ? '1' : '.55';
+  document.getElementById('bulkqr-mode-range').style.opacity = mode==='range' ? '1' : '.55';
+}
+bulkQrSetMode('upload');
+
+function bulkQrShowPreview(list){
+  bulkQrBarcodeList = list;
+  const statusEl=document.getElementById('bulkqr-file-status');
+  if(statusEl) statusEl.textContent = list.length ? (list.length+' barcode(s) found in file') : '';
+  document.getElementById('bulkqr-preview').style.display = list.length ? '' : 'none';
+  document.getElementById('bulkqr-preview-count').textContent = list.length;
+  document.getElementById('bulkqr-preview-sample').textContent = list.slice(0,5).join(', ') + (list.length>5?', …':'');
+}
+
+// ── Upload mode: parse CSV/Excel, find the barcode column ──
+function bulkQrHandleFile(file){
+  if(!file) return;
+  const statusEl=document.getElementById('bulkqr-file-status');
+  statusEl.textContent='Reading file…';
+
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const data=new Uint8Array(e.target.result);
+      const wb=XLSX.read(data,{type:'array'});
+      const sheet=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(sheet,{header:1,defval:''});
+      if(!rows.length){ statusEl.textContent='File appears empty.'; return; }
+
+      const headerRow=rows[0].map(h=>String(h).trim().toLowerCase());
+      let colIndex=headerRow.findIndex(h=>h.includes('barcode'));
+      let dataRows=rows.slice(1);
+      if(colIndex===-1){
+        // No obvious "barcode" header — fall back to the first column,
+        // and treat row 0 as data too (in case there's no header at all).
+        colIndex=0;
+        dataRows=rows;
+      }
+
+      const list=dataRows
+        .map(r=>String(r[colIndex]||'').trim())
+        .filter(Boolean);
+      const unique=Array.from(new Set(list));
+
+      if(!unique.length){ statusEl.textContent='No barcodes found in that file.'; return; }
+      bulkQrShowPreview(unique);
+    }catch(err){
+      statusEl.textContent='Could not read that file: '+err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Range mode: generate a sequential list from prefix+start+count ──
+function bulkQrGenerateRangeList(){
+  const prefix=document.getElementById('bulkqr-range-prefix').value.trim();
+  const start=parseInt(document.getElementById('bulkqr-range-start').value,10)||0;
+  const count=parseInt(document.getElementById('bulkqr-range-count').value,10)||0;
+  const padding=parseInt(document.getElementById('bulkqr-range-padding').value,10)||8;
+
+  if(count<1 || count>2000){ toast('Count must be between 1 and 2000','err'); return; }
+
+  const list=[];
+  for(let i=0;i<count;i++){
+    const num=String(start+i).padStart(padding,'0');
+    list.push(prefix+num);
+  }
+  bulkQrShowPreview(list);
+}
+
+// ── Generation: sign all barcodes, render QR PNGs, zip, download ──
+async function bulkQrRunGeneration(){
+  if(!bulkQrBarcodeList.length) return;
+  const token=authToken();
+  if(!token || token===SUPABASE_ANON_KEY){
+    toast('You need to be logged in to generate QR codes','err');
+    return;
+  }
+
+  const genBtn=document.getElementById('bulkqr-generate-btn');
+  const progressWrap=document.getElementById('bulkqr-progress');
+  const progressLabel=document.getElementById('bulkqr-progress-label');
+  const progressBar=document.getElementById('bulkqr-progress-bar');
+  genBtn.disabled=true;
+  progressWrap.style.display='';
+  progressBar.style.width='0%';
+
+  try{
+    // Step 1: sign all barcodes in chunks
+    progressLabel.textContent='Signing barcodes…';
+    const allResults=[];
+    const chunks=[];
+    for(let i=0;i<bulkQrBarcodeList.length;i+=BULK_QR_CHUNK_SIZE){
+      chunks.push(bulkQrBarcodeList.slice(i,i+BULK_QR_CHUNK_SIZE));
+    }
+    for(let i=0;i<chunks.length;i++){
+      const resp=await fetch(BULK_GET_QR_URL,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body:JSON.stringify({barcodes:chunks[i]})
+      });
+      if(!resp.ok){
+        const errBody=await resp.json().catch(function(){return {};});
+        throw new Error(errBody.error||('Signing failed ('+resp.status+')'));
+      }
+      const data=await resp.json();
+      allResults.push(...data.results);
+      progressBar.style.width=Math.round(((i+1)/chunks.length)*40)+'%'; // signing = first 40%
+    }
+
+    // Step 2: render a QR PNG for each signed URL
+    progressLabel.textContent='Rendering QR images…';
+    const renderArea=document.getElementById('bulkqr-qr-render-area');
+    const zip=new JSZip();
+    const qrFolder=zip.folder('qr-codes');
+    const csvRows=[['barcode','qr_url']];
+
+    for(let i=0;i<allResults.length;i++){
+      const {barcode,url}=allResults[i];
+      renderArea.innerHTML='';
+      await new Promise(function(resolve){
+        new QRCode(renderArea,{text:url,width:300,height:300,correctLevel:QRCode.CorrectLevel.M});
+        setTimeout(resolve,15); // QRCode.js renders synchronously but let the canvas settle
+      });
+      const canvas=renderArea.querySelector('canvas');
+      const dataUrl=canvas?canvas.toDataURL('image/png'):null;
+      if(dataUrl){
+        const base64=dataUrl.split(',')[1];
+        const safeName=barcode.replace(/[^a-zA-Z0-9_-]/g,'_');
+        qrFolder.file(safeName+'.png',base64,{base64:true});
+      }
+      csvRows.push([barcode,url]);
+
+      if(i%10===0 || i===allResults.length-1){
+        const pct=40+Math.round(((i+1)/allResults.length)*55); // rendering = next 55%
+        progressBar.style.width=pct+'%';
+        progressLabel.textContent='Rendering QR images… ('+(i+1)+'/'+allResults.length+')';
+      }
+    }
+    renderArea.innerHTML='';
+
+    // Step 3: package CSV + PNGs into one ZIP
+    progressLabel.textContent='Packaging ZIP…';
+    const csvContent=csvRows.map(row=>row.map(function(cell){
+      const s=String(cell);
+      return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+    }).join(',')).join('\n');
+    zip.file('qr-codes.csv',csvContent);
+
+    const blob=await zip.generateAsync({type:'blob'},function(meta){
+      progressBar.style.width=(95+Math.round(meta.percent*0.05))+'%';
+    });
+
+    const dlUrl=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=dlUrl;
+    a.download='atp-bulk-qr-'+Date.now()+'.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(dlUrl);
+
+    progressLabel.textContent='Done — '+allResults.length+' QR codes packaged.';
+    progressBar.style.width='100%';
+    toast('✅ Generated '+allResults.length+' QR codes','ok');
+  }catch(err){
+    toast('Bulk QR generation failed: '+err.message,'err');
+    progressLabel.textContent='Failed: '+err.message;
+  }finally{
+    genBtn.disabled=false;
+  }
+}
+
 document.addEventListener('DOMContentLoaded',function(){
   const closeBtn=document.getElementById('atpQrCloseBtn');
   const overlay=document.getElementById('atpQrOverlay');
   const printBtn=document.getElementById('atpQrPrintBtn');
+  const downloadBtn=document.getElementById('atpQrDownloadBtn');
   const copyBtn=document.getElementById('atpQrCopyBtn');
   if(closeBtn) closeBtn.addEventListener('click',closeAtpQrModal);
   if(overlay) overlay.addEventListener('click',function(e){ if(e.target===this) closeAtpQrModal(); });
@@ -1870,6 +2127,23 @@ document.addEventListener('DOMContentLoaded',function(){
       +'<img src="'+src+'" style="width:200px;height:200px;">'
       +'</body></html>');
     w.document.close(); w.focus(); w.print();
+  });
+  if(downloadBtn) downloadBtn.addEventListener('click',function(){
+    // Exports just the QR image as a PNG, named by barcode, so it can
+    // be dropped into external label-design software (BarTender,
+    // NiceLabel, etc.) as a second graphic alongside the pre-printed
+    // barcode on the same physical asset tag.
+    const canvas=document.querySelector('#atpQrCanvasWrap canvas');
+    const img=document.querySelector('#atpQrCanvasWrap img');
+    const src=canvas?canvas.toDataURL('image/png'):(img?img.src:null);
+    if(!src) return;
+    const assetTag=document.getElementById('atpQrAssetTag').textContent.replace(/[^a-zA-Z0-9_-]/g,'_');
+    const a=document.createElement('a');
+    a.href=src;
+    a.download='qr_'+assetTag+'.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   });
   if(copyBtn) copyBtn.addEventListener('click',function(){
     if(!atpQrCurrentUrl) return;
@@ -8518,6 +8792,7 @@ async function superOwnerSetTier(companyId, targetTier){
     <div id="atpQrCanvasWrap"><div class="atp-qr-loading">Generating…</div></div>
     <div class="atp-qr-actions">
       <button id="atpQrPrintBtn" type="button">Print</button>
+      <button id="atpQrDownloadBtn" type="button">Download</button>
       <button id="atpQrCopyBtn" type="button">Copy Link</button>
     </div>
     <button id="atpQrCloseBtn" type="button">Close</button>
