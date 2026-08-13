@@ -467,6 +467,7 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
   #atpQrModal button{flex:1;padding:9px 10px;border-radius:var(--r-sm);border:none;
     font-weight:700;font-size:12px;cursor:pointer;font-family:var(--fb);}
   #atpQrPrintBtn{background:var(--g-blue);color:#fff;}
+  #atpQrDownloadBtn{background:var(--surf2);color:var(--acc);border:1px solid var(--border)!important;}
   #atpQrCopyBtn{background:var(--surf2);color:var(--acc);border:1px solid var(--border)!important;}
   #atpQrCloseBtn{margin-top:8px;background:transparent;color:var(--text3);font-size:11px;padding:6px;}
 </style>
@@ -843,6 +844,11 @@ async function showAssetQrModal(asset){
   atpQrCurrentUrl=null;
   overlay.classList.add('open');
 
+  if(!asset.barcode){
+    canvasWrap.innerHTML='<div class="atp-qr-error">This asset has no barcode on record — QR codes are generated from the barcode.</div>';
+    return;
+  }
+
   const token=authToken();
   if(!token || token===SUPABASE_ANON_KEY){
     canvasWrap.innerHTML='<div class="atp-qr-error">You need to be logged in to generate a QR code.</div>';
@@ -853,7 +859,7 @@ async function showAssetQrModal(asset){
     const resp=await fetch(ATP_GET_QR_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify({asset_id:asset.id})
+      body:JSON.stringify({barcode:asset.barcode})
     });
     if(!resp.ok){
       const errBody=await resp.json().catch(function(){return {};});
@@ -874,6 +880,7 @@ document.addEventListener('DOMContentLoaded',function(){
   const closeBtn=document.getElementById('atpQrCloseBtn');
   const overlay=document.getElementById('atpQrOverlay');
   const printBtn=document.getElementById('atpQrPrintBtn');
+  const downloadBtn=document.getElementById('atpQrDownloadBtn');
   const copyBtn=document.getElementById('atpQrCopyBtn');
   if(closeBtn) closeBtn.addEventListener('click',closeAtpQrModal);
   if(overlay) overlay.addEventListener('click',function(e){ if(e.target===this) closeAtpQrModal(); });
@@ -891,6 +898,23 @@ document.addEventListener('DOMContentLoaded',function(){
       +'<img src="'+src+'" style="width:200px;height:200px;">'
       +'</body></html>');
     w.document.close(); w.focus(); w.print();
+  });
+  if(downloadBtn) downloadBtn.addEventListener('click',function(){
+    // Exports just the QR image as a PNG, named by barcode, so it can
+    // be dropped into external label-design software (BarTender,
+    // NiceLabel, etc.) as a second graphic alongside the pre-printed
+    // barcode on the same physical asset tag.
+    const canvas=document.querySelector('#atpQrCanvasWrap canvas');
+    const img=document.querySelector('#atpQrCanvasWrap img');
+    const src=canvas?canvas.toDataURL('image/png'):(img?img.src:null);
+    if(!src) return;
+    const assetTag=document.getElementById('atpQrAssetTag').textContent.replace(/[^a-zA-Z0-9_-]/g,'_');
+    const a=document.createElement('a');
+    a.href=src;
+    a.download='qr_'+assetTag+'.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   });
   if(copyBtn) copyBtn.addEventListener('click',function(){
     if(!atpQrCurrentUrl) return;
@@ -3561,6 +3585,7 @@ function toggleTheme(){
     <div id="atpQrCanvasWrap"><div class="atp-qr-loading">Generating…</div></div>
     <div class="atp-qr-actions">
       <button id="atpQrPrintBtn" type="button">Print</button>
+      <button id="atpQrDownloadBtn" type="button">Download</button>
       <button id="atpQrCopyBtn" type="button">Copy Link</button>
     </div>
     <button id="atpQrCloseBtn" type="button">Close</button>
