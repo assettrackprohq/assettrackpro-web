@@ -665,7 +665,15 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
             <div class="fg"><label class="fl">Serial No. <span class="req">REQUIRED</span></label><input class="fi" type="text" id="f-serial" placeholder="SN-XXXXX"></div>
           </div>
           <div class="fg"><label class="fl">Custodian <span class="req">REQUIRED</span></label><input class="fi" type="text" id="f-cust" placeholder="Assigned officer name"></div>
-          
+          <div class="fg"><label class="fl">Parent Asset <span style="font-weight:400;color:var(--text3);font-size:11px;">(optional — e.g. the cabinet this belongs to, from any previous session)</span></label>
+            <div class="bcrow" id="parentbcrow">
+              <span style="font-size:15px;color:var(--text3);">▦</span>
+              <input type="text" id="f-parent" list="f-parent-options" placeholder="Type, or tap SCAN, to find the parent asset…" oninput="onParentSearchInput(this.value)">
+              <button class="bcbtn" onclick="openScanner('parent')">📷 SCAN</button>
+            </div>
+            <datalist id="f-parent-options"></datalist>
+          </div>
+          <div id="f-parent-status" style="font-size:11px;color:var(--text3);margin-top:-4px;"></div>
           <div class="fg"><label class="fl">Notes</label><input class="fi" type="text" id="f-notes" placeholder="Remarks, observations…"></div>
           <!-- Custom fields injected here by renderCustomFieldInputs() -->
           <div id="cf-inputs-wrap"></div>
@@ -935,7 +943,7 @@ const sb = {
     'approval_status','approval_comment','approved_by','approved_at',
     'created_at','updated_at',
     'capture_lat','capture_lng','capture_location',
-    'project_id'],
+    'project_id','parent_barcode'],
   cleanAsset(data){
     const out={};
     this.ASSET_COLS.forEach(k=>{ if(k in data) out[k]=data[k]; });
@@ -2579,6 +2587,7 @@ async function saveAsset(){
     condition:document.getElementById('f-cond').value,
     custodian:document.getElementById('f-cust').value.trim(),
     serial:document.getElementById('f-serial').value.trim(),
+    parent_barcode:document.getElementById('f-parent')?document.getElementById('f-parent').value.trim()||null:null,
     notes:document.getElementById('f-notes').value||'',
     custom_fields:collectCustomFieldValues(),
     photos:photoUrls,
@@ -2686,7 +2695,8 @@ function getLocalAssets(){
 
 function resetForm(){
   photos=[null,null,null];
-  ['bc-inp','f-cust','f-serial','f-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['bc-inp','f-cust','f-serial','f-notes','f-parent'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  refreshParentBarcodeOptions();
   // Always unlock barcode field + scan button (guard against navigating away mid-resubmit)
   var bcInp=document.getElementById('bc-inp');if(bcInp){bcInp.readOnly=false;bcInp.style.opacity='';}
   var bcBtn=document.querySelector('#s-register .bcbtn');if(bcBtn){bcBtn.disabled=false;bcBtn.style.opacity='';}
@@ -2705,6 +2715,56 @@ function resetForm(){
     s.innerHTML=`<span class="pslot-i">${i===0?'📷':'➕'}</span><span class="pslot-l">${i===0?'MAIN':'ADD'}</span>`;
     const f=document.getElementById('pf'+i);if(f)f.value='';
   }
+}
+
+// Live search for the Parent Asset field — searches the FULL company
+// register via Supabase (not just this session), so an asset captured
+// today can be linked as a parent to one captured weeks ago, and vice
+// versa. Debounced to avoid firing a request on every keystroke.
+let parentSearchTimer=null;
+function onParentSearchInput(value){
+  clearTimeout(parentSearchTimer);
+  if(!value || value.trim().length<2){
+    refreshParentBarcodeOptions(); // fall back to session-only suggestions for short/empty input
+    return;
+  }
+  parentSearchTimer=setTimeout(()=>runParentSearch(value.trim()),350);
+}
+
+async function runParentSearch(term){
+  const dl=document.getElementById('f-parent-options');
+  const statusEl=document.getElementById('f-parent-status');
+  if(!dl) return;
+
+  if(!CONFIGURED || !currentUser?.company_id){
+    refreshParentBarcodeOptions();
+    return;
+  }
+
+  try{
+    const companyId=currentUser.company_id;
+    const encoded=encodeURIComponent(term);
+    // Match on barcode OR name, scoped to this company only
+    const q=`?company_id=eq.${companyId}&or=(barcode.ilike.*${encoded}*,name.ilike.*${encoded}*)&select=barcode,name&limit=20`;
+    const results=await sb.query('assets',q);
+    dl.innerHTML=results.map(a=>`<option value="${String(a.barcode).replace(/"/g,'&quot;')}">${a.name||''}</option>`).join('');
+    if(statusEl) statusEl.textContent=results.length?results.length+' match(es) found':'No matching assets found';
+  }catch(e){
+    // Offline or request failed — fall back to session-only suggestions rather than blocking the field
+    refreshParentBarcodeOptions();
+    if(statusEl) statusEl.textContent='Could not search full register — showing this session only';
+  }
+}
+
+// Populates the Parent Asset datalist from this session's already-captured
+// assets — used as a fallback when the live search above can't run
+// (offline, short input, or the request failed).
+function refreshParentBarcodeOptions(){
+  const dl=document.getElementById('f-parent-options');
+  const statusEl=document.getElementById('f-parent-status');
+  if(!dl) return;
+  dl.innerHTML=sessionAssets.map(a=>`<option value="${String(a.barcode).replace(/"/g,'&quot;')}">${a.name||''}</option>`).join('');
+  if(statusEl) statusEl.textContent='';
 }
 
 // ══════════════════════════════════════════════════════
@@ -3231,7 +3291,7 @@ let scanMode='reg',scanStream=null,scanActive=false,zxingReader=null,torchOn=fal
 
 function openScanner(mode){
   scanMode=mode;
-  const titles={reg:'Scan Asset Barcode',audit:'Scan Asset to Audit'};
+  const titles={reg:'Scan Asset Barcode',audit:'Scan Asset to Audit',parent:'Scan Parent Asset Barcode'};
   document.getElementById('so-ttl').textContent=titles[mode]||'Scan Barcode';
   document.getElementById('so-inp').value='';
   document.getElementById('scan-ov').classList.add('open');
@@ -3316,6 +3376,7 @@ function onScanResult(code){
     closeScanner();
     if(scanMode==='reg')applyBarcode(code);
     else if(scanMode==='audit')processAuditScan(code);
+    else if(scanMode==='parent')applyParentBarcode(code);
   },350);
 }
 
@@ -3323,6 +3384,55 @@ function applyBarcode(bc){
   document.getElementById('bc-inp').value=bc;
   document.getElementById('bcrow').classList.add('ok');
   toast('Barcode captured: '+bc,'ok');
+}
+
+async function applyParentBarcode(rawCode){
+  // The physical tag has both a barcode and a QR code — the QR encodes
+  // a full verification URL (.../verify.html?b=BARCODE&t=...), not a
+  // bare barcode. If the agent scans that side by mistake, extract the
+  // real barcode from it instead of trying to match the whole URL.
+  let code=rawCode;
+  if(/^https?:\/\//i.test(rawCode)){
+    try{
+      const parsed=new URL(rawCode);
+      const extracted=parsed.searchParams.get('b');
+      if(extracted) code=extracted;
+    }catch(e){ /* not a valid URL — fall through and try rawCode as-is */ }
+  }
+
+  const ownBarcode=document.getElementById('bc-inp').value.trim();
+  if(ownBarcode && code===ownBarcode){
+    toast('An asset cannot be its own parent','err');
+    return;
+  }
+
+  const parentInput=document.getElementById('f-parent');
+  const statusEl=document.getElementById('f-parent-status');
+  parentInput.value=code;
+  if(statusEl) statusEl.textContent='Checking…';
+
+  // Verify the scanned barcode actually exists in the register, and
+  // show its name for confirmation — same trust-but-verify approach as
+  // the main barcode field's instant duplicate check.
+  if(!CONFIGURED || !currentUser?.company_id){
+    if(statusEl) statusEl.textContent='Offline — could not verify, but the barcode has been filled in';
+    return;
+  }
+
+  try{
+    const companyId=currentUser.company_id;
+    const q=`?company_id=eq.${companyId}&barcode=eq.${encodeURIComponent(code)}&select=barcode,name&limit=1`;
+    const results=await sb.query('assets',q);
+    if(results.length){
+      toast('Parent linked: '+(results[0].name||code),'ok');
+      if(statusEl) statusEl.textContent='✓ Found: '+(results[0].name||code);
+    }else{
+      toast('Barcode not found in register — it may not be registered yet','warn');
+      if(statusEl) statusEl.textContent='⚠ Not found yet — the link will only work once that asset is registered';
+    }
+  }catch(e){
+    if(statusEl) statusEl.textContent='Could not verify — barcode filled in, but unconfirmed';
+  }
 }
 
 async function toggleTorch(){
