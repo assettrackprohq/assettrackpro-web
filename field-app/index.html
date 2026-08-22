@@ -2326,7 +2326,7 @@ function exportHistoryCSV(){
   const hist=getMyHistory();
   if(!hist.length){toast('No history to export','err');return;}
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
-    'Status','Condition','Custodian','Serial','Notes',
+    'Status','Condition','Custodian','Serial','Parent Barcode','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
     'GPS Latitude','GPS Longitude','GPS Location',
     'Registered By','Date Captured','Cloud Synced'];
@@ -2335,7 +2335,7 @@ function exportHistoryCSV(){
       a.project_name||'',
       a.barcode, a.name, a.category||'', a.sub_category||'',
       a.location||'', a.department||'', a.status||'', a.condition||'',
-      a.custodian||'', a.serial||'', a.notes||'',
+      a.custodian||'', a.serial||'', a.parent_barcode||'', a.notes||'',
       a.approval_status||'pending', a.approval_comment||'',
       a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
       a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
@@ -2784,12 +2784,26 @@ async function processAuditScan(bc){
     const local=getLocalAssets();
     asset=local.find(a=>a.barcode===bc)||sessionAssets.find(a=>a.barcode===bc)||null;
   }
+
+  // Parent/children lookups, scoped to the same tenant as the asset itself
+  let parentInfo=null, childrenInfo=[];
+  if(asset && CONFIGURED && asset.company_id){
+    try{
+      if(asset.parent_barcode){
+        const pRes=await sb.query('assets',`?company_id=eq.${asset.company_id}&barcode=eq.${encodeURIComponent(asset.parent_barcode)}&select=barcode,name,status&limit=1`);
+        if(pRes&&pRes.length)parentInfo=pRes[0];
+      }
+      const cRes=await sb.query('assets',`?company_id=eq.${asset.company_id}&parent_barcode=eq.${encodeURIComponent(bc)}&select=barcode,name,status&limit=200`);
+      if(cRes)childrenInfo=cRes;
+    }catch(e){}
+  }
+
   hideSaving();
   currentAuditAsset=asset;
-  showAuditResult(asset,bc);
+  showAuditResult(asset,bc,parentInfo,childrenInfo);
 }
 
-function showAuditResult(a,bc){
+function showAuditResult(a,bc,parentInfo,childrenInfo){
   const wrap=document.getElementById('aud-result');
   const imgWrap=document.getElementById('ar-img-wrap');
   const ttl=document.getElementById('ar-ttl-lbl');
@@ -2833,7 +2847,9 @@ function showAuditResult(a,bc){
   document.getElementById('ar-ctrl-rows').innerHTML=[
     ['Barcode',a.barcode],['Serial',a.serial||'—'],
     ['Registered',a.created_at?new Date(a.created_at).toLocaleDateString('en-GB'):'—'],
-  ].map(([k,v])=>`<div class="ar-row"><span class="ar-k">${k}<span class="ar-locked">LOCKED</span></span><span class="ar-v">${v}</span></div>`).join('');
+  ].map(([k,v])=>`<div class="ar-row"><span class="ar-k">${k}<span class="ar-locked">LOCKED</span></span><span class="ar-v">${v}</span></div>`).join('')
+  + (parentInfo ? `<div class="ar-row"><span class="ar-k">Part of</span><span class="ar-v">${parentInfo.name||parentInfo.barcode} (${parentInfo.status||'Unknown'})</span></div>` : '')
+  + (childrenInfo && childrenInfo.length ? `<div class="ar-row"><span class="ar-k">Contains</span><span class="ar-v">${childrenInfo.length} asset${childrenInfo.length===1?'':'s'}: ${childrenInfo.map(c=>c.name||c.barcode).join(', ')}</span></div>` : '');
 
   // Pre-fill editable fields
   document.getElementById('aud-cond').value=a.condition||(CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'Good');
@@ -3207,7 +3223,7 @@ function spoolDeleteAsset(id){
 function spoolCSV(){
   if(!sessionAssets.length){toast('No captures in this session','err');return;}
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
-    'Status','Condition','Custodian','Serial','Notes',
+    'Status','Condition','Custodian','Serial','Parent Barcode','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
     'GPS Latitude','GPS Longitude','GPS Location',
     'Registered By','Date Captured','Cloud Synced'];
@@ -3216,7 +3232,7 @@ function spoolCSV(){
       currentProjectName||'',
       a.barcode, a.name, a.category||'', a.sub_category||'',
       a.location||'', a.department||'', a.status||'', a.condition||'',
-      a.custodian||'', a.serial||'', a.notes||'',
+      a.custodian||'', a.serial||'', a.parent_barcode||'', a.notes||'',
       a.approval_status||'pending', a.approval_comment||'',
       a.approved_by||'', a.approved_at?new Date(a.approved_at).toLocaleString('en-GB'):'',
       a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
