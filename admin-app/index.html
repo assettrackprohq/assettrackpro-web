@@ -5234,10 +5234,10 @@ function exportFullCSV(){
   const data=getFilteredForExport();
   if(!data.length){toast('No data to export','err');return;}
   const _fmtDT=d=>{if(!d)return'';try{const dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){return String(d);}};
-  const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At','Custom Fields','Photos','Notes'];
+  const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Parent Barcode','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At','Custom Fields','Photos','Notes'];
   const rows=data.map(a=>{
     const proj=allProjects.find(p=>p.id===a.project_id);
-    return [proj?proj.name:'',a.barcode,a.name,a.category||'',a.sub_category||'',a.location||'',a.department||'',a.status||'',a.condition||'',a.custodian||'',a.serial||'',a.registered_by||'',_fmtDT(a.created_at),_fmtDT(a.last_audit_date),a.last_audit_by||'',a.last_audit_changes||'',a.approval_status||'',a.approval_comment||'',a.approved_by||'',_fmtDT(a.approved_at),a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),a.notes||''].map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(',');
+    return [proj?proj.name:'',a.barcode,a.name,a.category||'',a.sub_category||'',a.location||'',a.department||'',a.status||'',a.condition||'',a.custodian||'',a.serial||'',a.parent_barcode||'',a.registered_by||'',_fmtDT(a.created_at),_fmtDT(a.last_audit_date),a.last_audit_by||'',a.last_audit_changes||'',a.approval_status||'',a.approval_comment||'',a.approved_by||'',_fmtDT(a.approved_at),a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),a.notes||''].map(v=>'"'+String(v||'').replace(/"/g,'""')+'"').join(',');
   });
   const csv=[h.join(','),...rows].join('\n');
   const _ts=new Date().toISOString().replace(/[:.]/g,'-').slice(0,16);
@@ -5249,12 +5249,12 @@ function exportFullExcel(){
   const data=getFilteredForExport();
   if(!data.length){toast('No data','err');return;}
   const _fmtDT2=d=>{if(!d)return'';try{const dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){return String(d);}};
-  const hdrs=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At','Custom Fields','Photos','Notes'];
+  const hdrs=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Parent Barcode','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At','Custom Fields','Photos','Notes'];
   const escX=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const header=hdrs.map(h=>`<Cell ss:StyleID="h"><Data ss:Type="String">${escX(h)}</Data></Cell>`).join('');
   const rows=data.map(a=>{
     const proj=allProjects.find(p=>p.id===a.project_id);
-    const vals=[proj?proj.name:'',a.barcode,a.name,a.category||'',a.sub_category||'',a.location||'',a.department||'',a.status||'',a.condition||'',a.custodian||'',a.serial||'',a.registered_by||'',_fmtDT2(a.created_at),_fmtDT2(a.last_audit_date),a.last_audit_by||'',a.last_audit_changes||'',a.approval_status||'',a.approval_comment||'',a.approved_by||'',_fmtDT2(a.approved_at),a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),a.notes||''];
+    const vals=[proj?proj.name:'',a.barcode,a.name,a.category||'',a.sub_category||'',a.location||'',a.department||'',a.status||'',a.condition||'',a.custodian||'',a.serial||'',a.parent_barcode||'',a.registered_by||'',_fmtDT2(a.created_at),_fmtDT2(a.last_audit_date),a.last_audit_by||'',a.last_audit_changes||'',a.approval_status||'',a.approval_comment||'',a.approved_by||'',_fmtDT2(a.approved_at),a.custom_fields?(typeof a.custom_fields==='string'?a.custom_fields:JSON.stringify(a.custom_fields)):'',Array.isArray(a.photos)?a.photos.length:(a.photos?1:0),a.notes||''];
     return `<Row>${vals.map(v=>`<Cell><Data ss:Type="String">${escX(v)}</Data></Cell>`).join('')}</Row>`;
   }).join('');
   const xml=`<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"><Styles><Style ss:ID="h"><Font ss:Bold="1"/></Style></Styles><Worksheet ss:Name="Assets"><Table><Row>${header}</Row>${rows}</Table></Worksheet></Workbook>`;
@@ -5267,10 +5267,10 @@ function exportAuditReport(){
   const data=allAssets.filter(a=>!activeCompanyId||a.company_id===activeCompanyId);
   const audited=data.filter(a=>a.last_audit_date);
   const pending=data.filter(a=>!a.last_audit_date);
-  const h=['Project','Barcode','Asset Name','Location','Department','Status','Approval Status','Last Audit Date','Audited By','Changes','Notes'];
+  const h=['Project','Barcode','Asset Name','Location','Department','Parent Barcode','Status','Approval Status','Last Audit Date','Audited By','Changes','Notes'];
   const rows=[...audited,...pending].map(a=>{
     const proj=allProjects.find(p=>p.id===a.project_id);
-    return [proj?proj.name:'',a.barcode,a.name,a.location||'',a.department||'',a.status,a.approval_status||'pending',a.last_audit_date?new Date(a.last_audit_date).toLocaleDateString('en-GB'):'PENDING',a.last_audit_by||'',a.last_audit_changes||'',a.notes||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');
+    return [proj?proj.name:'',a.barcode,a.name,a.location||'',a.department||'',a.parent_barcode||'',a.status,a.approval_status||'pending',a.last_audit_date?new Date(a.last_audit_date).toLocaleDateString('en-GB'):'PENDING',a.last_audit_by||'',a.last_audit_changes||'',a.notes||''].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',');
   });
   dlFile('\uFEFF'+[h.join(','),...rows].join('\n'),'text/csv;charset=utf-8;',`AuditReport_${new Date().toISOString().split('T')[0]}.csv`);
   toast('Audit report exported!','ok');
