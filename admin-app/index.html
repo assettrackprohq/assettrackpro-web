@@ -4193,10 +4193,11 @@ function renderAssets(){
     var rejBtn=canApprove&&apvS!=='rejected'?'<button class="act-btn" style="padding:4px 8px;font-size:9px;background:rgba(214,48,64,.1);color:var(--acc3);border:1px solid rgba(214,48,64,.25);border-radius:8px;cursor:pointer;margin-left:3px;" data-id="'+a.id+'" onclick="openRejectModal(this.dataset.id)">&#x274C;</button>':'';
     var projObj=a.project_id?allProjects.find(function(p){return p.id===a.project_id;}):null;
     var projBadge=projObj?'<div style="font-size:9px;color:var(--acc5);margin-top:2px;">📁 '+projObj.name+'</div>':'';
+    var parentBadge=a.parent_barcode?'<div style="font-size:9px;color:var(--text3);margin-top:2px;">🔗 Part of '+a.parent_barcode+'</div>':'';
     return '<tr>'+
       '<td><input type="checkbox" class="asset-cb" data-id="'+a.id+'" style="accent-color:var(--acc3);width:14px;height:14px;cursor:pointer;" onchange="updateBulkBar()"></td>'+
       '<td>'+th+'</td>'+
-      '<td><div style="font-size:12px;color:var(--acc);cursor:pointer;font-weight:700;" data-id="'+a.id+'" onclick="openReviewDetail(this.dataset.id)" title="Click to review captured photos &amp; details">'+a.name+'</div><div style="font-size:9px;color:var(--text3);">'+(a.category||'')+(a.sub_category?' > '+a.sub_category:'')+'</div>'+projBadge+'</td>'+
+      '<td><div style="font-size:12px;color:var(--acc);cursor:pointer;font-weight:700;" data-id="'+a.id+'" onclick="openReviewDetail(this.dataset.id)" title="Click to review captured photos &amp; details">'+a.name+'</div><div style="font-size:9px;color:var(--text3);">'+(a.category||'')+(a.sub_category?' > '+a.sub_category:'')+'</div>'+projBadge+parentBadge+'</td>'+
       '<td style="font-family:monospace;font-size:10px;color:var(--acc);">'+a.barcode+'</td>'+
       '<td style="font-size:11px;color:var(--text2);">'+(a.category||'--')+'</td>'+
       '<td style="font-size:11px;color:var(--text2);">'+(a.location||'--')+'</td>'+
@@ -4495,6 +4496,10 @@ async function editAsset(id){
   const a=allAssets.find(x=>x.id===id);if(!a)return;
   const statusOpts=STATUS_OPTIONS.map(s=>`<option>${s}</option>`).join('');
   const condOpts=CONDITION_OPTIONS.map(c=>`<option>${c}</option>`).join('');
+  // Barcode options for the Parent Asset field, excluding this asset itself
+  const parentOpts=allAssets.filter(x=>x.id!==id&&x.barcode).map(x=>
+    `<option value="${String(x.barcode).replace(/"/g,'&quot;')}">${x.name||''}</option>`
+  ).join('');
   openModal(`<div class="modal-ttl">Edit Asset</div>
     <div class="fg"><div class="fl">Status</div><select class="fi" id="ea-status">${statusOpts}</select></div>
     <div class="fg"><div class="fl">Condition</div><select class="fi" id="ea-cond">${condOpts}</select></div>
@@ -4502,6 +4507,10 @@ async function editAsset(id){
     <div class="fg"><div class="fl">Department</div><select class="fi" id="ea-dept">${DEPARTMENTS.map(d=>`<option ${d===a.department?'selected':''}>${d}</option>`).join('')}</select></div>
     <div class="fg"><div class="fl">Serial Number <span class="req">REQUIRED</span></div><input class="fi" type="text" id="ea-serial" value="${a.serial||''}"></div>
     <div class="fg"><div class="fl">Custodian <span class="req">REQUIRED</span></div><input class="fi" type="text" id="ea-cust" value="${a.custodian||''}"></div>
+    <div class="fg"><div class="fl">Parent Asset <span style="font-weight:400;color:var(--text3);">(optional — e.g. the cabinet this battery lives in)</span></div>
+      <input class="fi" type="text" id="ea-parent" list="ea-parent-options" value="${a.parent_barcode||''}" placeholder="Search by barcode…">
+      <datalist id="ea-parent-options">${parentOpts}</datalist>
+    </div>
     <div class="fg"><div class="fl">Notes</div><input class="fi" type="text" id="ea-notes" value="${a.notes||''}"></div>
     <div class="modal-acts"><button class="act-btn btn-s" onclick="closeModal()">Cancel</button><button class="act-btn btn-p" onclick="saveEditAsset('${id}')">Save Changes</button></div>`);
   setTimeout(()=>{
@@ -4518,6 +4527,11 @@ async function saveEditAsset(id){
   if(!custodian){toast('Custodian is required','err');return;}
 
   const prev=allAssets.find(x=>x.id===id)||{};
+  const parentBarcodeRaw=document.getElementById('ea-parent')?document.getElementById('ea-parent').value.trim():'';
+  // Guard against an asset being set as its own parent
+  if(parentBarcodeRaw && prev.barcode && parentBarcodeRaw===prev.barcode){
+    toast('An asset cannot be its own parent','err');return;
+  }
   const newStatus=document.getElementById('ea-status').value;
   const newCond=document.getElementById('ea-cond').value;
 
@@ -4528,6 +4542,7 @@ async function saveEditAsset(id){
     department:document.getElementById('ea-dept').value,
     custodian,
     serial,
+    parent_barcode:parentBarcodeRaw||null,
     notes:document.getElementById('ea-notes').value,
     updated_at:new Date().toISOString()
   };
@@ -4538,6 +4553,7 @@ async function saveEditAsset(id){
   if(prev.condition&&prev.condition!==newCond)changes.push(`Condition: ${prev.condition} → ${newCond}`);
   if(prev.location&&prev.location!==updates.location)changes.push(`Location: ${prev.location} → ${updates.location}`);
   if(prev.custodian&&prev.custodian!==custodian)changes.push(`Custodian: ${prev.custodian} → ${custodian}`);
+  if((prev.parent_barcode||'')!==(updates.parent_barcode||''))changes.push(`Parent: ${prev.parent_barcode||'none'} → ${updates.parent_barcode||'none'}`);
   const changeStr=changes.length?changes.join(' | '):'No field changes';
 
   if(CONFIGURED){
