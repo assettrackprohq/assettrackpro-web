@@ -2078,6 +2078,8 @@ function persistHistory(asset, cloudSaved){
       capture_lat:asset.capture_lat||null,
       capture_lng:asset.capture_lng||null,
       capture_location:asset.capture_location||null,
+      notes:asset.notes||null,
+      parent_barcode:asset.parent_barcode||null,
     };
     if(existingIdx>=0){
       // Update in place — don't add a second entry
