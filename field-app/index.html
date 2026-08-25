@@ -2161,28 +2161,40 @@ function renderHistory(){
   refreshHistoryApprovals().then(()=>_renderHistoryUI()).catch(()=>_renderHistoryUI());
 }
 
+// Field users are restricted to their active project's data — no cross-project
+// browsing or export. If currentProjectId is set, history is filtered to only
+// entries captured under that project (entries with no project_id, from before
+// projects existed, are excluded once a project is active). If no project is
+// active at all (single/no-project setups), nothing is scoped out.
+function getScopedHistory(){
+  var hist=getMyHistory();
+  if(!currentProjectId) return hist;
+  return hist.filter(function(a){ return a.project_id===currentProjectId; });
+}
+
+// "Clear history" must also respect project scope — otherwise clearing while
+// viewing MTN would silently wipe Extended's locally-stored history too.
+function clearScopedHistory(){
+  var uname=currentUser?currentUser.username:'unknown';
+  if(!currentProjectId){
+    localStorage.removeItem('atp_history_'+uname);
+  } else {
+    var hist=getMyHistory().filter(function(a){ return a.project_id!==currentProjectId; });
+    localStorage.setItem('atp_history_'+uname,JSON.stringify(hist));
+  }
+  renderHistory();
+  updateSyncBadge();
+}
+
 function _renderHistoryUI(){
   var el=document.getElementById('history-list');
   if(!el)return;
-  var hist=getMyHistory();
+  var filtered=getScopedHistory();
+  var hist=filtered; // kept for the empty-state / count logic below
   if(!hist.length){
     el.innerHTML='<div class="empty"><div class="empty-i">&#x1F4CB;</div><div class="empty-t">No captures yet</div><div class="empty-s">Every asset you register appears here permanently, even after logout.</div></div>';
     return;
   }
-
-  // Build project map from history
-  var projMap={};
-  hist.forEach(function(a){ if(a.project_id&&a.project_name) projMap[a.project_id]=a.project_name; });
-  var showProjFilter=Object.keys(projMap).length>0;
-
-  // Get or set project filter — default to current project
-  var projFilter=document.getElementById('hist-proj-filter')?document.getElementById('hist-proj-filter').value:'';
-  if(!projFilter && currentProjectId && projMap[currentProjectId]) projFilter=currentProjectId;
-
-  // Apply filter
-  var filtered=projFilter&&projFilter!=='all'
-    ?hist.filter(function(a){ return (a.project_id||'none')===projFilter; })
-    :hist;
 
   var rejected=filtered.filter(function(a){return a.approval_status==='rejected';}).length;
   var approved=filtered.filter(function(a){return a.approval_status==='approved';}).length;
@@ -2200,14 +2212,13 @@ function _renderHistoryUI(){
     var fixBtn=apvS==='rejected'
       ?'<button onclick="openResubmitAsset(\''+a.id+'\')" style="margin-top:8px;width:100%;background:var(--g-blue);color:#0a1e38;border:none;border-radius:8px;padding:7px;font-size:11px;font-weight:800;cursor:pointer;font-family:var(--fh);">&#x270F;&#xFE0F; Fix &amp; Resubmit &#x2192;</button>':'';
     var gpsLine=a.capture_location?'<div style="font-size:9px;color:var(--text3);margin-top:3px;">&#x1F4CD; Captured at: '+a.capture_location+'</div>':'';
-    var projBadge=(!projFilter||projFilter==='all')&&a.project_name
-      ?'<div style="font-size:9px;color:var(--acc5);margin-top:2px;font-weight:700;">&#x1F4C1; '+a.project_name+'</div>':'';
+    // No project badge needed — every visible row already belongs to the
+    // single active project (getScopedHistory), so a per-row label would be redundant.
     return '<div style="background:'+bgColor+';border:1px solid '+borderColor+';border-radius:12px;padding:12px 14px;margin-bottom:8px;">'
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
         +'<div style="flex:1;min-width:0;">'
           +'<div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+a.name+'</div>'
           +'<div style="font-size:10px;color:var(--acc);font-family:monospace;margin-top:1px;">&#x25A3; '+a.barcode+'</div>'
-          +projBadge
         +'</div>'
         +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">'
           +'<span style="font-size:9px;padding:3px 8px;border-radius:5px;'+(a.cloud?'background:rgba(0,200,160,.12);color:var(--acc)':'background:rgba(255,160,0,.12);color:var(--acc2)')+'\">'+(a.cloud?'&#x2601; Cloud':'&#x1F4BE; Local')+'</span>'
@@ -2225,27 +2236,15 @@ function _renderHistoryUI(){
     +'</div>';
   }).join('');
 
-  // Project filter dropdown
-  var projOptions='<option value="all">All Projects ('+hist.length+')</option>';
-  Object.entries(projMap).forEach(function(e){
-    var cnt=hist.filter(function(a){return a.project_id===e[0];}).length;
-    projOptions+='<option value="'+e[0]+'" '+(projFilter===e[0]?'selected':'')+'>'+e[1]+' ('+cnt+')</option>';
-  });
-  if(hist.some(function(a){return !a.project_id;})){
-    var noCnt=hist.filter(function(a){return !a.project_id;}).length;
-    projOptions+='<option value="none" '+(projFilter==='none'?'selected':'')+'>No project ('+noCnt+')</option>';
-  }
-
   el.innerHTML=
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
-      +'<div style="font-size:11px;color:var(--text2);">'+filtered.length+' of '+hist.length+' captures'+(filtered.length!==hist.length?' (filtered)':'')+'</div>'
+      +'<div style="font-size:11px;color:var(--text2);">'+filtered.length+' capture'+(filtered.length===1?'':'s')+'</div>'
       +'<div style="display:flex;gap:8px;">'
         +'<button onclick="exportHistoryCSV()" style="font-size:10px;background:var(--acc);border:none;border-radius:7px;padding:6px 12px;color:#0a1e38;font-weight:700;cursor:pointer;">&#x2B07; CSV</button>'
-        +'<button onclick="if(confirm(\'Clear all history?\')){localStorage.removeItem(\'atp_history_\'+(currentUser?currentUser.username:\'unknown\'));renderHistory();updateSyncBadge();}" style="font-size:10px;background:var(--surf2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text3);cursor:pointer;">Clear</button>'
+        +'<button onclick="if(confirm(\'Clear all history for this project?\')){clearScopedHistory();}" style="font-size:10px;background:var(--surf2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;color:var(--text3);cursor:pointer;">Clear</button>'
       +'</div>'
     +'</div>'
-    +(showProjFilter?'<select id="hist-proj-filter" onchange="_renderHistoryUI()" style="width:100%;padding:8px 10px;font-size:11px;border-radius:8px;border:1px solid var(--border);background:var(--surf2);color:var(--text);font-weight:700;margin-bottom:10px;">'+projOptions+'</select>':'')
-    +(currentProjectName&&projFilter===currentProjectId?'<div style="font-size:10px;font-weight:700;color:var(--acc5);background:rgba(110,62,196,.1);border-radius:8px;padding:6px 10px;margin-bottom:10px;">&#x1F4C1; '+currentProjectName+'</div>':'')
+    +(currentProjectName?'<div style="font-size:10px;font-weight:700;color:var(--acc5);background:rgba(110,62,196,.1);border-radius:8px;padding:6px 10px;margin-bottom:10px;">&#x1F4C1; '+currentProjectName+'</div>':'')
     +'<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">'
       +'<span class="apv-pill apv-pending">&#x1F550; '+pending+' Pending</span>'
       +'<span class="apv-pill apv-approved">&#x2705; '+approved+' Approved</span>'
@@ -2325,7 +2324,10 @@ function blobDownload(blob, filename){
 }
 
 function exportHistoryCSV(){
-  const hist=getMyHistory();
+  // Scoped to the active project — a field user must not be able to export
+  // another project's data just because it happens to sit in the same
+  // on-device history store.
+  const hist=getScopedHistory();
   if(!hist.length){toast('No history to export','err');return;}
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
     'Status','Condition','Custodian','Serial','Parent Barcode','Notes',
@@ -2346,7 +2348,8 @@ function exportHistoryCSV(){
       a.cloud?'Yes':'No'
     ].map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');
   });
-  const filename='CaptureHistory_'+(currentUser?currentUser.username:'field')+'_'+new Date().toISOString().split('T')[0]+'.csv';
+  const projTag=currentProjectName?currentProjectName.replace(/[^a-z0-9]+/gi,'')+'_':'';
+  const filename='CaptureHistory_'+projTag+(currentUser?currentUser.username:'field')+'_'+new Date().toISOString().split('T')[0]+'.csv';
   triggerDownload('\uFEFF'+[h.join(',')].concat(rows).join('\n'), filename);
   toast('History exported \u2713','ok');
 }
@@ -2628,14 +2631,17 @@ async function saveAsset(){
     if(banner)banner.remove();
     if(cloudOk){
       toast(fromAudit?'Registered & verified ✓':'☁ Saved — Pending Admin Approval 🕐','ok');
-      setTimeout(()=>go(fromAudit?'audit':'home'),600);
+      // Audit flow: return to the audit checklist to pick up the next item.
+      // Normal registration: stay put and clear the form for the next capture,
+      // instead of bouncing back to Home after every single asset.
+      if(fromAudit){ setTimeout(()=>go('audit'),600); } else { resetForm(); }
     } else {
       // Saved to localStorage pending queue — will sync when online
       logFieldErr('saveAsset', cloudErr||'Cloud save failed', 'barcode='+asset.barcode);
       toast('Saved locally — will sync when online','warn');
       addToPendingSync(asset);
       currentCompanyAssetCount++;
-      setTimeout(()=>go(fromAudit?'audit':'home'),800);
+      if(fromAudit){ setTimeout(()=>go('audit'),800); } else { resetForm(); }
     }
   }
 
