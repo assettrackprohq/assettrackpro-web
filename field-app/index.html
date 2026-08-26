@@ -2713,8 +2713,12 @@ function resetForm(){
   var rb=document.getElementById('resubmit-banner');if(rb)rb.remove();
   var shdrEl=document.querySelector('#s-register .shdr-ttl');if(shdrEl)shdrEl.textContent='Register Asset';
   document.getElementById('bcrow').classList.remove('ok');
-  document.getElementById('f-cat').value='';
-  ['f-subcat','f-name'].forEach(id=>{const el=document.getElementById(id);el.innerHTML='<option>Select first…</option>';el.disabled=true;});
+  // Deliberately NOT clearing f-cat/f-subcat/f-name here — field reality is
+  // that several assets of the same type get registered back-to-back at the
+  // same location (e.g. a batch of batteries), so the product type stays as
+  // last selected. Only barcode, serial, custodian, notes, parent link and
+  // photos reset, since those genuinely differ per unit. Location/department
+  // were already untouched by this function before this change.
   document.getElementById('f-status').value=STATUS_OPTIONS[0]||'Active';
   document.getElementById('f-cond').value=CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'Good';
   for(let i=0;i<3;i++){
