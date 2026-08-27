@@ -2777,11 +2777,11 @@ async function saveCompanyConfig(companyId, key, value){
     try{
       const encoded=JSON.stringify(value);
       const ts=new Date().toISOString();
-      // PATCH first — update if row exists
+      // PATCH first — update if row exists (uses authToken(), required by RLS)
       const patch=await fetch(
         SUPABASE_URL+'/rest/v1/config?company_id=eq.'+companyId+'&key=eq.'+encodeURIComponent(key),
         {method:'PATCH',
-         headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+         headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),
                   'Content-Type':'application/json','Prefer':'return=representation'},
          body:JSON.stringify({value:encoded,updated_at:ts})}
       );
@@ -2791,7 +2791,7 @@ async function saveCompanyConfig(companyId, key, value){
       if(Array.isArray(patched)&&patched.length===0){
         const post=await fetch(SUPABASE_URL+'/rest/v1/config',
           {method:'POST',
-           headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+           headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),
                     'Content-Type':'application/json','Prefer':'return=representation'},
            body:JSON.stringify({company_id:companyId,key:key,value:encoded,updated_at:ts})}
         );
@@ -8645,10 +8645,13 @@ async function saveProjectAssignments(projectId){
     }
     // Remove deselected
     for(const a of toRemove){
-      if(CONFIGURED) await fetch(`${SUPABASE_URL}/rest/v1/project_assignments?id=eq.${a.id}`,{
-        method:'DELETE',
-        headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}
-      });
+      if(CONFIGURED){
+        const delRes=await fetch(`${SUPABASE_URL}/rest/v1/project_assignments?id=eq.${a.id}`,{
+          method:'DELETE',
+          headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken()}
+        });
+        if(!delRes.ok){const eb=await delRes.text();throw new Error('Remove assignment failed: '+delRes.status+' '+eb);}
+      }
       const idx=allAssignments.findIndex(x=>x.id===a.id);
       if(idx>=0)allAssignments.splice(idx,1);
     }
@@ -8656,11 +8659,16 @@ async function saveProjectAssignments(projectId){
     for(const a of toUpdate){
       const newLocs=userLocMap[a.user_id]||[];
       if(JSON.stringify(a.assigned_locations||[])===JSON.stringify(newLocs)) continue;
-      if(CONFIGURED) await fetch(`${SUPABASE_URL}/rest/v1/project_assignments?id=eq.${a.id}`,{
-        method:'PATCH',
-        headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
-        body:JSON.stringify({assigned_locations:newLocs})
-      });
+      if(CONFIGURED){
+        const updRes=await fetch(`${SUPABASE_URL}/rest/v1/project_assignments?id=eq.${a.id}`,{
+          method:'PATCH',
+          headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),'Content-Type':'application/json','Prefer':'return=representation'},
+          body:JSON.stringify({assigned_locations:newLocs})
+        });
+        if(!updRes.ok){const eb=await updRes.text();throw new Error('Update assignment failed: '+updRes.status+' '+eb);}
+        const updated=await updRes.json();
+        if(Array.isArray(updated)&&updated.length===0){throw new Error('Update assignment silently blocked (0 rows matched) — check RLS policy for user '+a.user_id);}
+      }
       const local=allAssignments.find(x=>x.id===a.id);
       if(local) local.assigned_locations=newLocs;
     }
