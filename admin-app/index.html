@@ -896,7 +896,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <!-- LOCATIONS — Project-scoped -->
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div class="card-ttl" style="margin:0;">📍 Locations <span style="font-size:10px;font-weight:400;">(by project)</span></div>
+            <div class="card-ttl" style="margin:0;">📍 Locations <span style="font-size:10px;font-weight:400;">(by project)</span> <span id="ld-unsaved-badge" style="display:none;font-size:9px;font-weight:700;color:#c0392b;background:#fdecea;padding:2px 7px;border-radius:10px;margin-left:6px;">● Unsaved changes</span></div>
           </div>
           <p style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.7;">Locations belong to projects. Select a project below to add or manage its locations.</p>
 
@@ -923,7 +923,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
               <button class="tag-add-btn" onclick="addLoc()">+ Add</button>
             </div>
             <div id="loc-save-row" style="margin-top:10px;display:none;">
-              <button class="act-btn btn-p" style="width:100%;padding:8px;" onclick="saveProjectLocs()">💾 Save Locations</button>
+              <button class="act-btn btn-p" style="width:100%;padding:8px;" onclick="saveAllLocsDepts()">💾 Save Locations & Departments (publishes to Field App)</button>
             </div>
           </div>
           <div id="loc-no-proj" style="font-size:11px;color:var(--text3);padding:12px 0;">Select a project above to manage its locations.</div>
@@ -947,7 +947,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           </div>
           <div id="dept-import-preview" style="display:none;margin-top:10px;"></div>
           <div style="margin-top:10px;">
-            <button class="act-btn btn-p" style="width:100%;padding:8px;" onclick="saveLocsDepts()">💾 Save Departments</button>
+            <button class="act-btn btn-p" style="width:100%;padding:8px;" onclick="saveAllLocsDepts()">💾 Save Locations & Departments (publishes to Field App)</button>
           </div>
         </div>
       </div>
@@ -3263,6 +3263,7 @@ async function importLocations(rows,filename){
     else skipped++;
   });
   showImportResultCard('loc-import-preview',{type:'locations',filename,added,skipped,errors:[],summary:`${LOCATIONS.length} total locations`});
+  markLocsDeptsUnsaved();
   renderLocsDepts();
   toast(`Locations: ${added} added, ${skipped} duplicates skipped`,'ok');
 }
@@ -3277,6 +3278,7 @@ async function importDepartments(rows,filename){
     else skipped++;
   });
   showImportResultCard('dept-import-preview',{type:'departments',filename,added,skipped,errors:[],summary:`${DEPARTMENTS.length} total departments`});
+  markLocsDeptsUnsaved();
   renderLocsDepts();
   toast(`Departments: ${added} added, ${skipped} duplicates skipped`,'ok');
 }
@@ -5097,22 +5099,6 @@ function ldRemoveLoc(projId, loc){
   renderLocsDepts();
 }
 
-function addLoc(){
-  const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
-  const inp=document.getElementById('loc-inp');
-  const nm=(inp?inp.value:'').trim();
-  if(!nm){toast('Enter a location name','err');return;}
-  if(!projId){toast('Select a project first','err');return;}
-  const p=allProjects.find(p=>p.id===projId);if(!p)return;
-  if(!p.locations)p.locations=[];
-  if(p.locations.includes(nm)){toast('Location already exists in this project','err');return;}
-  p.locations.push(nm);
-  if(inp)inp.value='';
-  renderLocsDepts();
-  // Also add to global LOCATIONS for backward compat with asset dropdowns
-  if(!LOCATIONS.includes(nm)) LOCATIONS.push(nm);
-}
-
 async function ldImportLocs(input){
   const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
   if(!projId){toast('Select a project first','err');input.value='';return;}
@@ -5144,7 +5130,8 @@ async function ldImportLocs(input){
     added++;
   });
   input.value='';
-  toast(`${added} location${added!==1?'s':''} imported · ${skipped} skipped`,'ok');
+  toast(`${added} location${added!==1?'s':''} imported · ${skipped} skipped — click "Save Locations & Departments" below to make this live`,'ok');
+  markLocsDeptsUnsaved();
   renderLocsDepts();
 }
 
@@ -5157,17 +5144,67 @@ function ldDownloadLocTemplate(){
   toast('Template downloaded','ok');
 }
 function populateLocsDepts(){renderLocsDepts();}
-function addLoc(){const v=document.getElementById('loc-inp').value.trim();if(!v)return;if(LOCATIONS.includes(v)){toast('Already exists','err');return;}LOCATIONS.push(v);document.getElementById('loc-inp').value='';renderLocsDepts();}
-function addDept(){const v=document.getElementById('dept-inp').value.trim();if(!v)return;if(DEPARTMENTS.includes(v)){toast('Already exists','err');return;}DEPARTMENTS.push(v);document.getElementById('dept-inp').value='';renderLocsDepts();}
-function removeLoc(l){LOCATIONS=LOCATIONS.filter(x=>x!==l);renderLocsDepts();}
-function removeDept(d){DEPARTMENTS=DEPARTMENTS.filter(x=>x!==d);renderLocsDepts();}
-
-async function saveLocsDepts(){
-  if(!activeCompanyId){toast('Select a workspace first','err');return;}
-  await saveCompanyConfig(activeCompanyId,'locations',LOCATIONS);
-  await saveCompanyConfig(activeCompanyId,'departments',DEPARTMENTS);
-  toast('Locations & Departments saved for '+((activeCompany&&activeCompany.name)||'workspace'),'ok');
+function addLoc(){
+  const v=document.getElementById('loc-inp').value.trim();
+  if(!v)return;
+  if(LOCATIONS.includes(v)){toast('Already exists','err');return;}
+  LOCATIONS.push(v);
+  const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
+  const p=allProjects.find(pr=>pr.id===projId);
+  if(p){
+    if(!p.locations)p.locations=[];
+    if(!p.locations.includes(v))p.locations.push(v);
+    if(!p.active_locations)p.active_locations=[];
+    if(!p.active_locations.includes(v))p.active_locations.push(v);
+  }
+  document.getElementById('loc-inp').value='';
+  markLocsDeptsUnsaved();
+  renderLocsDepts();
 }
+function addDept(){const v=document.getElementById('dept-inp').value.trim();if(!v)return;if(DEPARTMENTS.includes(v)){toast('Already exists','err');return;}DEPARTMENTS.push(v);document.getElementById('dept-inp').value='';markLocsDeptsUnsaved();renderLocsDepts();}
+function removeLoc(l){
+  LOCATIONS=LOCATIONS.filter(x=>x!==l);
+  allProjects.forEach(p=>{
+    if(p.locations) p.locations=p.locations.filter(x=>x!==l);
+    if(p.active_locations) p.active_locations=p.active_locations.filter(x=>x!==l);
+  });
+  markLocsDeptsUnsaved();
+  renderLocsDepts();
+}
+function removeDept(d){DEPARTMENTS=DEPARTMENTS.filter(x=>x!==d);markLocsDeptsUnsaved();renderLocsDepts();}
+
+let _locsDeptsUnsaved=false;
+function markLocsDeptsUnsaved(){
+  _locsDeptsUnsaved=true;
+  const badge=document.getElementById('ld-unsaved-badge');
+  if(badge)badge.style.display='inline-block';
+}
+
+// Single save action: persists master Locations + Departments to the
+// active workspace's config, AND the selected project's location list —
+// so there is exactly one button that makes changes actually show up
+// on the Field App, instead of two differently-scoped buttons.
+async function saveAllLocsDepts(){
+  if(!activeCompanyId){toast('Select a workspace first','err');return;}
+  try{
+    await saveCompanyConfig(activeCompanyId,'locations',LOCATIONS);
+    await saveCompanyConfig(activeCompanyId,'departments',DEPARTMENTS);
+    const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
+    const p=allProjects.find(pr=>pr.id===projId);
+    if(p){
+      await sb.update('projects',p.id,{locations:p.locations||[],active_locations:p.active_locations||[],updated_at:new Date().toISOString()});
+    }
+    _locsDeptsUnsaved=false;
+    const badge=document.getElementById('ld-unsaved-badge');
+    if(badge)badge.style.display='none';
+    toast('Saved — Locations & Departments are now live'+(p?` for "${p.name}"`:''),'ok');
+    renderLocsDepts();
+  }catch(e){
+    toast('Save failed: '+e.message,'err');
+  }
+}
+// Back-compat: old code/buttons calling this name now do the full save
+async function saveLocsDepts(){ return saveAllLocsDepts(); }
 
 // ══════════════════════════════════════════════════════
 // REPORTS
