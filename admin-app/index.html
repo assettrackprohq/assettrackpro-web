@@ -5030,7 +5030,7 @@ function renderLocsDepts(){
     if(!allLocs.length){
       locTags.innerHTML='<div style="font-size:11px;color:var(--text3);padding:8px 0;">No locations added yet. Type below or import a file.</div>';
     } else {
-      locTags.innerHTML=allLocs.map(l=>{
+      locTags.innerHTML=allLocs.map((l,i)=>{
         const active=activeLocs.includes(l);
         return `<div class="tag" style="cursor:default;position:relative;padding-right:52px;">
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer;" title="${active?'Active — visible to field agents':'Inactive — not assigned yet'}">
@@ -5038,10 +5038,10 @@ function renderLocsDepts(){
               ${active?'checked':''}
               style="accent-color:var(--acc4);width:13px;height:13px;"
               onchange="ldToggleActivation('${selectedProjId}')">
-            <span style="font-weight:${active?'800':'400'};color:${active?'var(--acc4)':'var(--text2)'};">${l}</span>
+            <span style="font-weight:${active?'800':'400'};color:${active?'var(--acc4)':'var(--text2)'};">${l.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>
             ${active?'<span style="font-size:8px;background:rgba(0,153,107,.15);color:var(--acc4);padding:1px 5px;border-radius:4px;font-weight:700;">ACTIVE</span>':''}
           </label>
-          <button class="tag-x" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);" onclick="ldRemoveLoc('${selectedProjId}','${l.replace(/'/g,"\\'")}')">✕</button>
+          <button class="tag-x" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);" onclick="ldRemoveLoc('${selectedProjId}', ${i})">✕</button>
         </div>`;
       }).join('');
     }
@@ -5054,7 +5054,7 @@ function _renderDeptTags(){
   const deptEl=document.getElementById('dept-tags');
   if(deptEl){
     deptEl.innerHTML=DEPARTMENTS.length
-      ?DEPARTMENTS.map(d=>`<div class="tag">${d}<button class="tag-x" onclick="removeDept('${d.replace(/'/g,"\\'")}')">✕</button></div>`).join('')
+      ?DEPARTMENTS.map((d,i)=>`<div class="tag">${d.replace(/&/g,'&amp;').replace(/</g,'&lt;')}<button class="tag-x" onclick="removeDept(${i})">✕</button></div>`).join('')
       :'<div style="font-size:11px;color:var(--text3);padding:8px 0;">No departments yet.</div>';
   }
 }
@@ -5092,11 +5092,37 @@ async function saveProjectLocs(){
   renderLocsDepts();
 }
 
-function ldRemoveLoc(projId, loc){
+function ldRemoveLoc(projId, idx){
   const p=allProjects.find(p=>p.id===projId);if(!p)return;
-  p.locations=(p.locations||[]).filter(l=>l!==loc);
+  if(!Array.isArray(p.locations))return;
+  const loc=p.locations[idx];
+  if(loc===undefined)return;
+  p.locations=p.locations.filter((_,i)=>i!==idx);
   p.active_locations=(p.active_locations||[]).filter(l=>l!==loc);
   renderLocsDepts();
+}
+
+// Proper quote-aware CSV field parser (handles commas inside quoted
+// fields and "" as an escaped quote) — replaces the old naive
+// newline-only split that mashed multi-field rows into one string.
+function _parseCsvLine(line){
+  const fields=[];
+  let cur='', inQuotes=false;
+  for(let i=0;i<line.length;i++){
+    const c=line[i];
+    if(inQuotes){
+      if(c==='"'){
+        if(line[i+1]==='"'){cur+='"';i++;}
+        else inQuotes=false;
+      } else cur+=c;
+    } else {
+      if(c==='"') inQuotes=true;
+      else if(c===','){fields.push(cur);cur='';}
+      else cur+=c;
+    }
+  }
+  fields.push(cur);
+  return fields.map(f=>f.trim()).filter(Boolean);
 }
 
 async function ldImportLocs(input){
@@ -5108,7 +5134,7 @@ async function ldImportLocs(input){
   let locs=[];
   if(ext==='csv'||ext==='txt'){
     const text=await file.text();
-    locs=text.split(/\r?\n/).map(l=>l.replace(/^"|"$/g,'').trim()).filter(Boolean);
+    locs=text.split(/\r?\n/).filter(l=>l.trim().length).flatMap(_parseCsvLine);
     // Skip header
     if(locs[0]&&/location/i.test(locs[0]))locs=locs.slice(1);
   } else {
@@ -5171,7 +5197,7 @@ function removeLoc(l){
   markLocsDeptsUnsaved();
   renderLocsDepts();
 }
-function removeDept(d){DEPARTMENTS=DEPARTMENTS.filter(x=>x!==d);markLocsDeptsUnsaved();renderLocsDepts();}
+function removeDept(idx){DEPARTMENTS=DEPARTMENTS.filter((_,i)=>i!==idx);markLocsDeptsUnsaved();renderLocsDepts();}
 
 let _locsDeptsUnsaved=false;
 function markLocsDeptsUnsaved(){
@@ -8373,14 +8399,14 @@ function openProjectLocations(projectId){
   const activeLocs=Array.isArray(p.active_locations)?p.active_locations:[];
 
   const locRows=allLocs.length
-    ?allLocs.map(l=>{
+    ?allLocs.map((l,i)=>{
       const active=activeLocs.includes(l);
       return `<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;background:${active?'rgba(0,153,107,.07)':'var(--surf2)'};margin-bottom:5px;border:1.5px solid ${active?'rgba(0,153,107,.25)':'var(--border)'};">
         <input type="checkbox" class="proj-loc-cb" data-loc="${l.replace(/"/g,'&quot;')}" ${active?'checked':''}
           style="accent-color:var(--acc4);width:15px;height:15px;flex-shrink:0;">
-        <span style="flex:1;font-size:12px;font-weight:${active?'700':'400'};color:var(--text);">${l}</span>
+        <span style="flex:1;font-size:12px;font-weight:${active?'700':'400'};color:var(--text);">${l.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>
         ${active?'<span style="font-size:9px;background:rgba(0,153,107,.15);color:var(--acc4);padding:2px 8px;border-radius:5px;font-weight:800;">ACTIVE</span>':''}
-        <button onclick="ldRemoveLoc('${projectId}','${l.replace(/'/g,"\\'")}');closeModal();openProjectLocations('${projectId}')" style="background:none;border:none;color:var(--acc3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
+        <button onclick="ldRemoveLoc('${projectId}', ${i});closeModal();openProjectLocations('${projectId}')" style="background:none;border:none;color:var(--acc3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
       </label>`;
     }).join('')
     :`<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">No locations added yet. Add one below or import a file.</div>`;
