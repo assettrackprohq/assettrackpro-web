@@ -423,6 +423,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <button class="nav-item on" onclick="show('dashboard')"><span class="ni">📊</span>Dashboard</button>
       <button class="nav-item" onclick="show('assets')"><span class="ni">📦</span>Asset Register</button>
       <button class="nav-item" onclick="show('bulk-qr')"><span class="ni">🏷️</span>Bulk QR Codes</button>
+      <button class="nav-item" onclick="show('label-audit')"><span class="ni">🔎</span>Label Audit</button>
       <button class="nav-item" onclick="show('projects')"><span class="ni">📁</span>Projects</button>
       <button class="nav-item" onclick="show('audit-mgmt')"><span class="ni">✅</span>Audit Management</button>
       <div class="sb-sect">Platform</div>
@@ -1189,6 +1190,61 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           <button class="btn-s act-btn" onclick="populateReportFilterDropdowns()">🔄 Refresh Lists</button>
           <button class="btn-d act-btn" onclick="clearReportFilters()">✕ Clear Filters</button>
         </div>
+      </div>
+    </div>
+
+    <!-- ══ LABEL AUDIT ══ -->
+    <div class="panel" id="p-label-audit">
+      <div class="panel-hdr">
+        <div><div class="panel-ttl">Label Audit</div><div class="panel-sub">Find missing or wrongly-captured labels within a barcode sequence</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-ttl">1. Choose Project</div>
+        <div class="f3">
+          <div class="fg"><div class="fl">Project</div><select class="fi" id="la-project" onchange="laProjectChanged()"><option value="">Select a project…</option></select></div>
+        </div>
+      </div>
+
+      <div class="card" id="la-mode-card" style="display:none;">
+        <div class="card-ttl">2. Choose Mode</div>
+        <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
+          <button class="btn-s act-btn" id="la-mode-auto-btn" onclick="laSetMode('auto')">🔍 Auto-detect (no assigned range)</button>
+          <button class="btn-s act-btn" id="la-mode-range-btn" onclick="laSetMode('range')">📋 Assigned Range (with owner)</button>
+        </div>
+
+        <div id="la-auto-fields" style="display:none;">
+          <div class="f3">
+            <div class="fg"><div class="fl">Prefix</div><input class="fi" id="la-auto-prefix" placeholder="e.g. AES"></div>
+            <div class="fg"><div class="fl">Digit padding</div><input class="fi" type="number" id="la-auto-pad" value="4" min="1" max="10"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin:6px 0 10px;">Looks at whatever's already captured with this prefix and reports gaps between the lowest and highest number found.</div>
+          <button class="btn-p act-btn" onclick="laRunAuto()">▶ Scan for Gaps</button>
+        </div>
+
+        <div id="la-range-fields" style="display:none;">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px;">Saved ranges for this project</div>
+          <div id="la-range-list" style="margin-bottom:14px;"></div>
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px;">+ Add a new assigned range</div>
+          <div class="f3">
+            <div class="fg"><div class="fl">Prefix</div><input class="fi" id="la-r-prefix" placeholder="e.g. AES"></div>
+            <div class="fg"><div class="fl">Digit padding</div><input class="fi" type="number" id="la-r-pad" value="4" min="1" max="10"></div>
+            <div class="fg"><div class="fl">Start #</div><input class="fi" type="number" id="la-r-start" placeholder="1"></div>
+            <div class="fg"><div class="fl">End #</div><input class="fi" type="number" id="la-r-end" placeholder="50"></div>
+            <div class="fg"><div class="fl">Assign to (optional)</div><select class="fi" id="la-r-user"><option value="">No specific owner</option></select></div>
+          </div>
+          <button class="btn-p act-btn" onclick="laSaveRange()">💾 Save Range</button>
+        </div>
+      </div>
+
+      <div class="card" id="la-results-card" style="display:none;">
+        <div class="card-ttl">Results</div>
+        <div class="kgrid" id="la-kpis" style="margin-bottom:14px;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button class="btn-s act-btn" onclick="laExportCSV()">📄 Export CSV</button>
+          <button class="btn-d act-btn" onclick="laRefresh()">🔄 Refresh</button>
+        </div>
+        <div id="la-results-table" style="max-height:420px;overflow-y:auto;"></div>
       </div>
     </div>
 
@@ -3880,6 +3936,7 @@ const TIER_PANEL_MAP = {
 };
 
 const TIER_ASSET_CAP = { 0: 5000, 1: 20000, 2: Infinity };
+const TIER_USER_CAP  = { 0: 5, 1: 10, 2: Infinity };
 const TIER_LABELS    = { 0:'BASIC', 1:'PRO', 2:'ENTERPRISE' };
 
 let blockedTierPanels = [];
@@ -3965,6 +4022,55 @@ function checkAssetCap(){
   return true;
 }
 
+// ══════════════════════════════════════════════════════
+// USER CAP POLICY
+//   Basic       5 users    → blocked from adding a 6th,  prompted to upgrade to Pro
+//   Pro        10 users    → blocked from adding an 11th, prompted to upgrade to Enterprise
+//   Enterprise  Unlimited  → no cap, no prompt
+// ══════════════════════════════════════════════════════
+// Called before inserting a new user. companyId is the tenant the new
+// user is being added to (not necessarily the acting admin's own company,
+// since Super Owner/multi-company admins can add users to any scoped company).
+// Returns true if allowed, false if the tier's user cap is already reached.
+function checkUserCap(companyId){
+  const co = allCompanies&&allCompanies.length ? allCompanies.find(c=>c.id===companyId) : null;
+  const tier = APP_ENVIRONMENT === 'ENTERPRISE_ONPREM'
+    ? ONPREM_LICENSE_TIER
+    : (co ? (Number(co.tier)||0) : (activeCompany ? (Number(activeCompany.tier)||0) : 0));
+  const cap = TIER_USER_CAP[tier];
+  if(cap === Infinity) return true; // Enterprise — no cap, no prompt
+
+  const count = allUsers.filter(u=>u.company_id===companyId).length;
+  if(count >= cap){
+    if(APP_ENVIRONMENT === 'SAAS'){
+      showUpgradeModal(tier + 1 <= 2 ? tier + 1 : 2);
+    } else {
+      toast(`⛔ ${TIER_LABELS[tier]} user cap (${cap}) reached. Contact Skyrit Technologies to upgrade.`,'err');
+    }
+    return false;
+  }
+  return true;
+}
+
+// Live "X / Y users" indicator in the Users & Roles panel header.
+function updateUserCapIndicator(companyId){
+  const el=document.getElementById('users-panel-sub');
+  if(!el)return;
+  if(!companyId){ el.textContent='Manage field users and assign them to companies'; return; }
+  const co = allCompanies&&allCompanies.length ? allCompanies.find(c=>c.id===companyId) : null;
+  const tier = APP_ENVIRONMENT === 'ENTERPRISE_ONPREM'
+    ? ONPREM_LICENSE_TIER
+    : (co ? (Number(co.tier)||0) : 0);
+  const cap = TIER_USER_CAP[tier];
+  const count = allUsers.filter(u=>u.company_id===companyId).length;
+  if(cap === Infinity){
+    el.textContent = `${count} user${count!==1?'s':''} · ${TIER_LABELS[tier]} — unlimited`;
+  } else {
+    el.textContent = `${count} / ${cap} users · ${TIER_LABELS[tier]} tier${count>=cap?' — cap reached':''}`;
+    el.style.color = count>=cap ? 'var(--acc3)' : (count>=cap*0.8 ? '#e6a000' : '');
+  }
+}
+
 function showCapWarningBanner(tier, count, cap, remaining){
   const el = document.getElementById('asset-cap-warn');
   if(!el) return;
@@ -4035,6 +4141,7 @@ function show(name){
   if(name==='setup'){renderPermMatrix();renderStatusConditionTags();}
   if(name==='customfields'){renderCustomFields();}
   if(name==='import'){initImportPanel();}
+  if(name==='label-audit'){renderLabelAudit();}
 }
 
 // Dynamic badge class — cycles through badge classes for any custom status values
@@ -4725,6 +4832,7 @@ function renderUsers(){
   const cnt=document.getElementById('users-count');
   if(cnt) cnt.textContent=users.length+' user'+(users.length!==1?'s':'');
   updateWorkspaceBadge();
+  updateUserCapIndicator(coFilter||(!isSuperOwner()?activeCompanyId:null));
 
   if(!users.length){
     el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:16px 0;text-align:center;">No users in this workspace yet.<br><span style="font-size:11px;">Click + Add User to create one.</span></div>';
@@ -4787,6 +4895,7 @@ async function saveNewUser(){
   const is_first_login=document.getElementById('nu-firstlogin')?document.getElementById('nu-firstlogin').checked:true;
   if(!name||!username||!pass){toast('Fill all required fields','err');return;}
   if(allUsers.find(u=>u.username===username)){toast('Username already exists','err');return;}
+  if(!checkUserCap(company_id)) return;
   // password_hash is set to an unusable random placeholder here — the real
   // password is hashed server-side via atp-set-password right after insert,
   // so the client never writes a real password into this column directly.
@@ -5231,6 +5340,192 @@ async function saveAllLocsDepts(){
 }
 // Back-compat: old code/buttons calling this name now do the full save
 async function saveLocsDepts(){ return saveAllLocsDepts(); }
+
+// ══════════════════════════════════════════════════════
+// LABEL AUDIT — missing/mismatched label detection
+// ══════════════════════════════════════════════════════
+let laMode='auto';
+let laLastResults=[]; // rows from the most recent check, for CSV export
+let laRanges=[];      // saved label_ranges rows for the currently selected project
+
+function renderLabelAudit(){
+  const sel=document.getElementById('la-project');
+  if(!sel)return;
+  const projs=activeCompanyId?allProjects.filter(p=>p.company_id===activeCompanyId):allProjects;
+  sel.innerHTML='<option value="">Select a project…</option>'+projs.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  document.getElementById('la-mode-card').style.display='none';
+  document.getElementById('la-results-card').style.display='none';
+  const uSel=document.getElementById('la-r-user');
+  if(uSel){
+    const projUsers=activeCompanyId?allUsers.filter(u=>u.company_id===activeCompanyId):allUsers;
+    uSel.innerHTML='<option value="">No specific owner</option>'+projUsers.map(u=>`<option value="${u.username}">${u.name||u.username}</option>`).join('');
+  }
+}
+
+async function laProjectChanged(){
+  const projId=document.getElementById('la-project').value;
+  document.getElementById('la-results-card').style.display='none';
+  if(!projId){document.getElementById('la-mode-card').style.display='none';return;}
+  document.getElementById('la-mode-card').style.display='block';
+  await laLoadRanges(projId);
+  laSetMode(laMode);
+}
+
+function laSetMode(mode){
+  laMode=mode;
+  document.getElementById('la-mode-auto-btn').classList.toggle('btn-p',mode==='auto');
+  document.getElementById('la-mode-auto-btn').classList.toggle('btn-s',mode!=='auto');
+  document.getElementById('la-mode-range-btn').classList.toggle('btn-p',mode==='range');
+  document.getElementById('la-mode-range-btn').classList.toggle('btn-s',mode!=='range');
+  document.getElementById('la-auto-fields').style.display=mode==='auto'?'block':'none';
+  document.getElementById('la-range-fields').style.display=mode==='range'?'block':'none';
+}
+
+async function laLoadRanges(projId){
+  try{
+    laRanges=await sb.query('label_ranges',`?project_id=eq.${projId}&order=created_at.desc`);
+    if(!Array.isArray(laRanges))laRanges=[];
+  }catch(e){ laRanges=[]; }
+  const list=document.getElementById('la-range-list');
+  if(!list)return;
+  list.innerHTML=laRanges.length
+    ? laRanges.map(r=>`<div class="tag" style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:6px;">
+        <span style="font-family:monospace;font-weight:700;">${r.prefix}${String(r.start_num).padStart(r.pad,'0')}–${r.prefix}${String(r.end_num).padStart(r.pad,'0')}</span>
+        <span style="font-size:11px;color:var(--text3);">${r.assigned_username?('→ '+r.assigned_username):'(no owner assigned)'}</span>
+        <button class="btn-s act-btn" style="padding:4px 10px;font-size:11px;margin-left:auto;" onclick="laRunRange('${r.id}')">▶ Check</button>
+        <button class="tag-x" onclick="laDeleteRange('${r.id}')">✕</button>
+      </div>`).join('')
+    : '<div style="font-size:11px;color:var(--text3);">No saved ranges yet for this project.</div>';
+}
+
+async function laSaveRange(){
+  const projId=document.getElementById('la-project').value;
+  const prefix=document.getElementById('la-r-prefix').value.trim();
+  const pad=parseInt(document.getElementById('la-r-pad').value)||4;
+  const start=parseInt(document.getElementById('la-r-start').value);
+  const end=parseInt(document.getElementById('la-r-end').value);
+  const username=document.getElementById('la-r-user').value||null;
+  if(!prefix){toast('Enter a prefix','err');return;}
+  if(isNaN(start)||isNaN(end)||end<start){toast('Enter a valid start/end range','err');return;}
+  if(end-start>5000){toast('Range too large (max 5,000 labels at a time)','err');return;}
+  const user=username?(allUsers.find(u=>u.username===username)):null;
+  try{
+    await sb.insert('label_ranges',{
+      id:'lr-'+Date.now(),
+      company_id:activeCompanyId, project_id:projId,
+      prefix, pad, start_num:start, end_num:end,
+      assigned_user_id:user?user.id:null, assigned_username:username,
+      created_by:currentUser?currentUser.username:null
+    });
+    toast('Range saved','ok');
+    document.getElementById('la-r-prefix').value='';
+    document.getElementById('la-r-start').value='';
+    document.getElementById('la-r-end').value='';
+    await laLoadRanges(projId);
+  }catch(e){ toast('Save failed: '+e.message,'err'); }
+}
+
+async function laDeleteRange(id){
+  if(!confirm('Delete this saved range?'))return;
+  try{
+    await sb.remove('label_ranges',id);
+    toast('Range deleted','ok');
+    await laLoadRanges(document.getElementById('la-project').value);
+  }catch(e){ toast('Delete failed: '+e.message,'err'); }
+}
+
+// Core diff engine, shared by auto-detect and defined-range modes.
+// expectedLabels: array of exact barcode strings expected to exist.
+// assignedUsername: if set, flags any capture by a different user as a mismatch.
+async function laComputeGaps(projId, prefix, expectedLabels, assignedUsername){
+  const captured=await sb.query('assets',`?project_id=eq.${projId}&barcode=ilike.${encodeURIComponent(prefix)}*&select=barcode,registered_by,approval_status`);
+  const byBarcode={};
+  if(Array.isArray(captured)) captured.forEach(a=>{ byBarcode[a.barcode]=a; });
+  const rows=expectedLabels.map(label=>{
+    const a=byBarcode[label];
+    if(!a) return {label, status:'missing', capturedBy:'', note:'Not yet captured'};
+    if(assignedUsername && a.registered_by!==assignedUsername){
+      return {label, status:'mismatch', capturedBy:a.registered_by, note:`Captured by ${a.registered_by}, assigned to ${assignedUsername}`};
+    }
+    return {label, status:'captured', capturedBy:a.registered_by||'', note:''};
+  });
+  return rows;
+}
+
+function laPad(n,pad){ return String(n).padStart(pad,'0'); }
+
+async function laRunAuto(){
+  const projId=document.getElementById('la-project').value;
+  const prefix=document.getElementById('la-auto-prefix').value.trim();
+  const pad=parseInt(document.getElementById('la-auto-pad').value)||4;
+  if(!prefix){toast('Enter a prefix','err');return;}
+  toast('Scanning…','ok');
+  const captured=await sb.query('assets',`?project_id=eq.${projId}&barcode=ilike.${encodeURIComponent(prefix)}*&select=barcode`);
+  const nums=[];
+  if(Array.isArray(captured)) captured.forEach(a=>{
+    const m=String(a.barcode||'').match(new RegExp('^'+prefix.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\d+)$','i'));
+    if(m) nums.push(parseInt(m[1],10));
+  });
+  if(!nums.length){toast('No captured labels found with this prefix yet','err');return;}
+  const min=Math.min(...nums), max=Math.max(...nums);
+  const expected=[];
+  for(let i=min;i<=max;i++) expected.push(prefix+laPad(i,pad));
+  const rows=await laComputeGaps(projId, prefix, expected, null);
+  laShowResults(rows, `${prefix}${laPad(min,pad)} – ${prefix}${laPad(max,pad)} (auto-detected span)`);
+}
+
+async function laRunRange(rangeId){
+  const r=laRanges.find(x=>x.id===rangeId);
+  if(!r)return;
+  toast('Checking…','ok');
+  const expected=[];
+  for(let i=r.start_num;i<=r.end_num;i++) expected.push(r.prefix+laPad(i,r.pad));
+  const rows=await laComputeGaps(r.project_id, r.prefix, expected, r.assigned_username||null);
+  laShowResults(rows, `${r.prefix}${laPad(r.start_num,r.pad)} – ${r.prefix}${laPad(r.end_num,r.pad)}`+(r.assigned_username?` · assigned to ${r.assigned_username}`:''));
+}
+
+function laShowResults(rows, rangeLabel){
+  laLastResults=rows;
+  const total=rows.length;
+  const missing=rows.filter(r=>r.status==='missing').length;
+  const mismatch=rows.filter(r=>r.status==='mismatch').length;
+  const captured=total-missing-mismatch;
+  document.getElementById('la-kpis').innerHTML=`
+    <div class="kpi c1"><div class="ki">🏷️</div><div class="kl">Total in Range</div><div class="kv">${total}</div></div>
+    <div class="kpi c2"><div class="ki">✅</div><div class="kl">Captured</div><div class="kv">${captured}</div></div>
+    <div class="kpi c3"><div class="ki">❌</div><div class="kl">Missing</div><div class="kv">${missing}</div></div>
+    <div class="kpi c4"><div class="ki">⚠️</div><div class="kl">Wrong Owner</div><div class="kv">${mismatch}</div></div>`;
+  const badge=s=>s==='missing'?'<span class="badge" style="background:rgba(255,72,88,.12);color:#ff4858;">MISSING</span>'
+    :s==='mismatch'?'<span class="badge" style="background:rgba(230,160,0,.15);color:#e6a000;">WRONG OWNER</span>'
+    :'<span class="badge" style="background:rgba(0,153,107,.12);color:var(--acc4);">CAPTURED</span>';
+  const showRows=rows.filter(r=>r.status!=='captured'); // only surface what needs attention
+  document.getElementById('la-results-table').innerHTML =
+    `<div style="font-size:11px;color:var(--text3);margin-bottom:8px;">${rangeLabel}${showRows.length?'':' — all labels accounted for ✅'}</div>` +
+    (showRows.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead><tr style="text-align:left;border-bottom:1px solid var(--border);">
+        <th style="padding:6px;">Label</th><th style="padding:6px;">Status</th><th style="padding:6px;">Detail</th>
+      </tr></thead>
+      <tbody>${showRows.map(r=>`<tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:6px;font-family:monospace;font-weight:700;">${r.label}</td>
+        <td style="padding:6px;">${badge(r.status)}</td>
+        <td style="padding:6px;color:var(--text3);">${r.note}</td>
+      </tr>`).join('')}</tbody>
+    </table>` : '');
+  document.getElementById('la-results-card').style.display='block';
+}
+
+function laRefresh(){
+  if(laMode==='auto') laRunAuto();
+  else toast('Click "Check" next to the saved range you want to refresh','ok');
+}
+
+function laExportCSV(){
+  if(!laLastResults.length){toast('Run a check first','err');return;}
+  const h=['Label','Status','Detail'];
+  const rows=laLastResults.map(r=>[r.label,r.status,r.note].map(v=>'"'+String(v||'')+'"').join(','));
+  dlFile([h.join(','),...rows].join('\n'),'text/csv',`LabelAudit_${new Date().toISOString().split('T')[0]}.csv`);
+  toast('Exported','ok');
+}
 
 // ══════════════════════════════════════════════════════
 // REPORTS
