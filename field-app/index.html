@@ -547,6 +547,8 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
       <div id="cap-warning-banner" style="display:none;"></div>
       <!-- Active project badge -->
       <div id="active-project-badge" style="display:none;font-size:11px;font-weight:700;color:var(--acc);background:rgba(0,119,204,.1);border:1px solid rgba(0,119,204,.25);border-radius:8px;padding:6px 12px;margin-bottom:8px;"></div>
+      <!-- My assigned label range progress (only shown if the admin assigned one) -->
+      <div id="my-range-widget" style="display:none;"></div>
       <div class="sec"><div class="sec-t">Quick Actions</div></div>
       <div class="qagrid">
         <button class="qa prime" onclick="go('register')"><div class="qa-i">📷</div><div class="qa-l">Scan & Register Asset</div></button>
@@ -1475,6 +1477,52 @@ function goToApp(){
     }
   }
   initApp();
+  loadMyRangeWidget();
+}
+
+// Shows live progress for any label range(s) an admin has assigned
+// to the current user within the current project. Silent no-op if
+// none are assigned, or if offline (best-effort — see markup note).
+async function loadMyRangeWidget(){
+  const el=document.getElementById('my-range-widget');
+  if(!el)return;
+  if(!CONFIGURED||!currentUser||!currentProjectId){ el.style.display='none'; return; }
+  if(!navigator.onLine){
+    el.style.display='block';
+    el.innerHTML='<div style="font-size:11px;color:var(--text3);padding:8px 0;">📡 Connect to see your label progress</div>';
+    return;
+  }
+  try{
+    const ranges=await sb.query('label_ranges',`?project_id=eq.${encodeURIComponent(currentProjectId)}&assigned_username=eq.${encodeURIComponent(currentUser.username)}`);
+    if(!Array.isArray(ranges)||!ranges.length){ el.style.display='none'; return; }
+    const cards=await Promise.all(ranges.map(async r=>{
+      const expectedCount=r.end_num-r.start_num+1;
+      const captured=await sb.query('assets',`?project_id=eq.${encodeURIComponent(currentProjectId)}&barcode=ilike.${encodeURIComponent(r.prefix)}*&registered_by=eq.${encodeURIComponent(currentUser.username)}&select=barcode`);
+      const have=new Set();
+      if(Array.isArray(captured)) captured.forEach(a=>{
+        const m=String(a.barcode||'').match(new RegExp('^'+r.prefix.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\d+)$','i'));
+        if(m){ const n=parseInt(m[1],10); if(n>=r.start_num&&n<=r.end_num) have.add(n); }
+      });
+      const missing=[];
+      for(let i=r.start_num;i<=r.end_num;i++) if(!have.has(i)) missing.push(r.prefix+String(i).padStart(r.pad,'0'));
+      const done=expectedCount-missing.length;
+      const pct=Math.round((done/expectedCount)*100);
+      return `<div style="background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:700;">
+          <span>🏷️ ${r.prefix}${String(r.start_num).padStart(r.pad,'0')}–${r.prefix}${String(r.end_num).padStart(r.pad,'0')}</span>
+          <span style="color:${missing.length?'var(--acc3)':'var(--acc4)'};">${done}/${expectedCount}</span>
+        </div>
+        <div style="background:var(--border);border-radius:4px;height:6px;margin:6px 0;overflow:hidden;">
+          <div style="background:${missing.length?'var(--acc3)':'var(--acc4)'};height:100%;width:${pct}%;"></div>
+        </div>
+        ${missing.length ? `<div style="font-size:10px;color:var(--text3);">Missing: ${missing.slice(0,8).join(', ')}${missing.length>8?` +${missing.length-8} more`:''}</div>` : '<div style="font-size:10px;color:var(--acc4);">✅ All labels captured</div>'}
+      </div>`;
+    }));
+    el.innerHTML=cards.join('');
+    el.style.display='block';
+  }catch(e){
+    el.style.display='none';
+  }
 }
 
 
