@@ -610,7 +610,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <table class="tbl">
           <thead><tr>
             <th style="width:36px;"><input type="checkbox" id="assets-select-all" title="Select all" onchange="toggleSelectAllAssets(this.checked)" style="accent-color:var(--acc3);width:14px;height:14px;cursor:pointer;"></th>
-            <th>Photo</th><th>Asset</th><th>Barcode</th><th>Category</th><th>Location</th><th>Dept</th><th>Custodian</th><th>Status</th><th>Approval</th><th>Comment</th><th>Actions</th>
+            <th>Photo</th><th>Asset</th><th>Barcode</th><th>Category</th><th>Location</th><th>Dept</th><th>Custodian</th><th>Status</th><th>Approval</th><th>Comment</th><th>Notes</th><th>Actions</th>
           </tr></thead>
           <tbody id="assets-tbody"></tbody>
         </table>
@@ -4206,6 +4206,7 @@ function renderAssets(){
       '<td>'+statusBadge(a.status)+'</td>'+
       '<td>'+approvalBadge(a)+'</td>'+
       '<td style="font-size:10px;color:var(--text2);max-width:180px;white-space:normal;">'+(a.approval_comment?a.approval_comment:'<span style="color:var(--text3);">—</span>')+'</td>'+
+      '<td style="font-size:10px;color:var(--text2);max-width:180px;white-space:normal;">'+(a.notes?a.notes:'<span style="color:var(--text3);">—</span>')+'</td>'+
       '<td style="white-space:nowrap;"><button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" data-id="'+a.id+'" onclick="editAsset(this.dataset.id)">Edit</button><button class="act-btn btn-d" style="padding:5px 10px;font-size:10px;margin-left:4px;" data-id="'+a.id+'" data-name="'+a.name+'" onclick="deleteAsset(this.dataset.id,this.dataset.name)">Delete</button><button class="act-btn" style="padding:5px 10px;font-size:10px;margin-left:4px;background:var(--surf2);color:var(--acc);border:1px solid var(--border);" data-id="'+a.id+'" onclick="adminShowAssetQr(this.dataset.id)">QR</button>'+appBtn+rejBtn+'</td>'+
     '</tr>';
   }).join('');
@@ -4348,6 +4349,7 @@ function openReviewDetail(id){
       (projObj?'<div><span style="color:var(--text3);">Project</span><br><strong>📁 '+projObj.name+'</strong></div>':'')+
       '<div><span style="color:var(--text3);">Status</span><br>'+approvalBadge(a)+'</div>'+
       (a.approval_comment?'<div><span style="color:var(--text3);">Comment</span><br><strong>'+a.approval_comment+'</strong></div>':'')+
+      (a.notes?'<div><span style="color:var(--text3);">Notes</span><br><strong>'+a.notes+'</strong></div>':'')+
     '</div>'+
     _customFieldsBlock(a)+
     '<div style="font-size:11px;color:var(--text2);font-weight:800;margin-bottom:6px;">PHOTOS ('+photos.length+') &mdash; click any photo to expand</div>'+
