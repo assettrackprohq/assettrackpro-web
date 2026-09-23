@@ -3102,7 +3102,8 @@ function renderSpool(){
     // this company has defined and this asset actually has values for —
     // previously the Spool card showed nothing about custom fields at all.
     const cfVals=_parseCF(a);
-    const cfPairs=(customFields||[]).filter(f=>cfVals[f.key]!=null&&cfVals[f.key]!=='')
+    const cfDefs=_resolveCFFor(a.project_id);
+    const cfPairs=cfDefs.filter(f=>cfVals[f.key]!=null&&cfVals[f.key]!=='')
       .map(f=>(f.label||f.key)+': '+(f.type==='checkbox'?(cfVals[f.key]?'Yes':'No'):cfVals[f.key]));
     const cfLine=cfPairs.length
       ?'<div style="font-size:9px;color:var(--acc5);margin-top:1px;">&#x1F3F7; '+cfPairs.join(' · ')+'</div>'
@@ -3254,7 +3255,13 @@ function spoolDeleteAsset(id){
 
 function spoolCSV(){
   if(!sessionAssets.length){toast('No captures in this session','err');return;}
-  const cfCols=customFields||[];
+  // Union of custom field columns across every project represented in this
+  // session's captures (usually just one, but resolved per-asset for
+  // correctness), defaults first.
+  const seenCF={}; const cfCols=[];
+  function _addCF(list){(list||[]).forEach(f=>{if(!seenCF[f.key]){seenCF[f.key]=1;cfCols.push(f);}});}
+  _addCF(cfAllScopes['']);
+  Array.from(new Set(sessionAssets.map(a=>a.project_id).filter(Boolean))).forEach(pid=>_addCF(cfAllScopes[pid]));
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
     'Status','Condition','Custodian','Serial','Parent Barcode','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
@@ -3562,24 +3569,42 @@ function getBadgeStyle(status){
 }
 
 // ── CUSTOM FIELDS ──────────────────────────────────────────────────────
+// Custom field DEFINITIONS are now scoped per-project, not just per-company:
+// a company can have a default set (config key 'custom_fields'), and any
+// project can override it with its own set (config key
+// 'custom_fields:'+projectId). `cfAllScopes` caches every scope's array for
+// the active company in one query; `customFields` always reflects whichever
+// scope the current context resolves to (the active project's override if
+// one exists, else the company default).
 let customFields=[];
+let cfAllScopes={};
+
+function _resolveCFFor(projectId){
+  if(projectId&&cfAllScopes[projectId])return cfAllScopes[projectId];
+  return cfAllScopes['']||[];
+}
 
 function loadCustomFieldsForCompany(companyId){
   if(CONFIGURED){
-    sb.query('config',`?company_id=eq.${companyId}&key=eq.custom_fields&select=value`)
+    // PostgREST 'like' with '*' as wildcard — fetches the company-default row
+    // (key='custom_fields') and every project-scoped row (key='custom_fields:<id>') in one call.
+    sb.query('config',`?company_id=eq.${companyId}&key=like.custom_fields*&select=key,value`)
       .then(rows=>{
-        if(rows&&rows.length){
+        cfAllScopes={};
+        (rows||[]).forEach(r=>{
+          const scope=r.key==='custom_fields'?'':r.key.slice('custom_fields:'.length);
           try{
-            const parsed=JSON.parse(rows[0].value||'[]');
-            // Handle double-encoded legacy data
-            customFields=typeof parsed==='string'?JSON.parse(parsed):parsed;
-          }catch(e){customFields=[];}
-        } else {customFields=[];}
+            const parsed=JSON.parse(r.value||'[]');
+            cfAllScopes[scope]=typeof parsed==='string'?JSON.parse(parsed):parsed;
+          }catch(e){cfAllScopes[scope]=[];}
+        });
+        customFields=_resolveCFFor(currentProjectId);
         renderCustomFieldInputs();
-      }).catch(()=>{customFields=[];renderCustomFieldInputs();});
+      }).catch(()=>{cfAllScopes={};customFields=[];renderCustomFieldInputs();});
   } else {
-    try{customFields=JSON.parse(localStorage.getItem(`atp_cf_${companyId||'_'}`)||'[]');}
-    catch(e){customFields=[];}
+    try{cfAllScopes=JSON.parse(localStorage.getItem(`atp_cf_${companyId||'_'}`)||'{}');}
+    catch(e){cfAllScopes={};}
+    customFields=_resolveCFFor(currentProjectId);
     renderCustomFieldInputs();
   }
 }
