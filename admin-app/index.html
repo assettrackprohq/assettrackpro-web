@@ -3694,6 +3694,16 @@ function doLogout(){
 async function initAdmin(){
   // ── Step 1: Load all companies (scoped internally by loadCompanies) ──
   await loadCompanies();
+  // Custom field DEFINITIONS (e.g. "Capacity") were only ever loaded inside
+  // switchWorkspace() — which a normal single-company admin login never
+  // calls, since loadCompanies() sets activeCompanyId directly via its own
+  // auto-select fallback. That left `customFields` permanently empty for
+  // the whole session unless someone happened to manually switch workspace,
+  // silently breaking the review modal's Custom Fields block and the
+  // per-field export columns even when the field data itself was saved
+  // correctly. Loading it here guarantees it's populated for whichever
+  // company ends up active, on every login.
+  loadCustomFields();
   // ── Expiry notifications + auto-suspend sweep (runs every login) ──
   await checkExpiryNotifications();
 
