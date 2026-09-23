@@ -958,11 +958,16 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
     <!-- ══ CUSTOM FIELDS ══ -->
     <div class="panel" id="p-customfields">
       <div class="panel-hdr">
-        <div><div class="panel-ttl">Custom Fields</div><div class="panel-sub">Define extra data fields for asset registration</div></div>
+        <div><div class="panel-ttl">Custom Fields</div><div class="panel-sub">Define extra data fields for asset registration — per project, or a company-wide default</div></div>
         <button class="btn-acc" onclick="openAddCustomField()">+ Add Field</button>
+      </div>
+      <div class="fg" style="max-width:420px;">
+        <div class="fl">Editing fields for</div>
+        <select class="fi" id="cf-scope-sel" onchange="switchCFScope(this.value)"></select>
       </div>
       <div style="background:var(--surf2);border-radius:var(--r-sm);padding:14px;margin-bottom:18px;font-size:12px;color:var(--text2);line-height:1.7;">
         Custom fields appear on the field registration form. Field types: <strong style="color:var(--text);">Text, Number, Date, Dropdown, Checkbox, Barcode/Scan, Textarea.</strong> Fields marked <em style="color:var(--acc2);">Required</em> must be filled before an asset can be saved.
+        <br><strong style="color:var(--text);">Per-project fields:</strong> a project without its own fields uses the Company Default set. Switching to a project here and saving gives it its own independent set — editing it afterward no longer affects the default or other projects.
       </div>
       <div id="cf-list" style="display:flex;flex-direction:column;gap:10px;">
         <div style="text-align:center;padding:40px;color:var(--text3);font-size:13px;">No custom fields defined yet — click Add Field to create one.</div>
@@ -4041,7 +4046,7 @@ function show(name){
   if(name==='locations'){renderLocsDepts();}
   if(name==='taxonomy'){populateTaxonomyEditor();}
   if(name==='setup'){renderPermMatrix();renderStatusConditionTags();}
-  if(name==='customfields'){renderCustomFields();}
+  if(name==='customfields'){populateCFScopeSelector();renderCustomFields();}
   if(name==='import'){initImportPanel();}
 }
 
@@ -4315,9 +4320,10 @@ function _parseCF(a){
 // asset's captured values — used by the review modal so field-captured
 // custom data is actually visible during approval, not just buried in export.
 function _customFieldsBlock(a){
-  if(!customFields||!customFields.length)return'';
+  var defs=resolveCFFor(a.project_id);
+  if(!defs||!defs.length)return'';
   var vals=_parseCF(a);
-  var rows=customFields.map(function(f){
+  var rows=defs.map(function(f){
     var raw=vals[f.key];
     var disp=f.type==='checkbox'?(raw?'Yes':'No'):(raw!=null&&raw!==''?raw:'--');
     return '<div><span style="color:var(--text3);">'+(f.label||f.key)+'</span><br><strong>'+disp+'</strong></div>';
@@ -5269,6 +5275,21 @@ function clearReportFilters(){
   toast('Filters cleared','ok');
 }
 
+// Union of custom field columns across every project represented in a given
+// export's data — defaults first, then any additional fields introduced by
+// a project-specific override, in the order projects are first encountered.
+// A per-row value is still read via that row's OWN resolved field set
+// (checkbox Yes/No formatting etc.), but placed into the shared column
+// position — so an export spanning multiple projects with different custom
+// fields gets one coherent header row instead of one column set per project.
+function _unionCFColumns(data){
+  const seen={}; const union=[];
+  function addAll(list){(list||[]).forEach(f=>{if(!seen[f.key]){seen[f.key]=1;union.push(f);}});}
+  addAll(cfAllScopes['']);
+  Array.from(new Set(data.map(a=>a.project_id).filter(Boolean))).forEach(pid=>addAll(cfAllScopes[pid]));
+  return union;
+}
+
 function exportFullCSV(){
   const data=getFilteredForExport();
   if(!data.length){toast('No data to export','err');return;}
@@ -5277,7 +5298,7 @@ function exportFullCSV(){
   // column instead of dumping the whole custom_fields object as one JSON blob
   // — the blob was technically present but unreadable/unsearchable in a
   // spreadsheet, which is why it read as "missing" from the export.
-  const cfCols=customFields||[];
+  const cfCols=_unionCFColumns(data);
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Parent Barcode','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At',...cfCols.map(f=>f.label||f.key),'Photos','Notes'];
   const rows=data.map(a=>{
     const proj=allProjects.find(p=>p.id===a.project_id);
@@ -5295,7 +5316,7 @@ function exportFullExcel(){
   const data=getFilteredForExport();
   if(!data.length){toast('No data','err');return;}
   const _fmtDT2=d=>{if(!d)return'';try{const dt=new Date(d);return dt.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'})+' '+dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});}catch(e){return String(d);}};
-  const cfCols=customFields||[];
+  const cfCols=_unionCFColumns(data);
   const hdrs=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department','Status','Condition','Custodian','Serial','Parent Barcode','Registered By','Date & Time Registered','Last Audit Date & Time','Last Audit By','Audit Changes','Approval Status','Approval Comment','Approved By','Approved At',...cfCols.map(f=>f.label||f.key),'Photos','Notes'];
   const escX=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const header=hdrs.map(h=>`<Cell ss:StyleID="h"><Data ss:Type="String">${escX(h)}</Data></Cell>`).join('');
@@ -6457,7 +6478,15 @@ function logErr(context,message,extra){
 }
 
 // ── CUSTOM FIELDS ──────────────────────────────────────────────────────
+// Definitions are scoped per-project, not just per-company: a company has a
+// default set (config key 'custom_fields'), and any project can override it
+// with its own set (config key 'custom_fields:'+projectId). cfAllScopes
+// caches every scope for the active company; `customFields` reflects
+// whichever scope is currently being VIEWED/EDITED on the Setup screen
+// (cfActiveScope: '' = company default, else a project id).
 let customFields = [];
+let cfAllScopes = {};
+let cfActiveScope = '';
 const CF_TYPES = {
   text:     {label:'Text',        icon:'📝', desc:'Free text entry'},
   number:   {label:'Number',      icon:'🔢', desc:'Numeric value'},
@@ -6468,34 +6497,77 @@ const CF_TYPES = {
   textarea: {label:'Long Text',   icon:'📄', desc:'Multi-line text area'},
 };
 
+// Resolves the effective field set for a given project: its own override if
+// one has been saved, else the company default. Used anywhere we're looking
+// at a SPECIFIC asset/project (review modal, exports), as opposed to the
+// Setup screen's editing view which uses cfActiveScope instead.
+function resolveCFFor(projectId){
+  if(projectId && cfAllScopes[projectId]) return cfAllScopes[projectId];
+  return cfAllScopes['']||[];
+}
+
 function loadCustomFields(){
   if(CONFIGURED){
-    sb.query('config',`?company_id=eq.${activeCompanyId}&key=eq.custom_fields&select=value`)
+    // 'like' with '*' as PostgREST's wildcard fetches the company-default row
+    // (key='custom_fields') and every project override (key='custom_fields:<id>') in one call.
+    sb.query('config',`?company_id=eq.${activeCompanyId}&key=like.custom_fields*&select=key,value`)
       .then(rows=>{
-        if(rows&&rows.length){
-          let val=rows[0].value||'[]';
+        cfAllScopes={};
+        (rows||[]).forEach(r=>{
+          const scope=r.key==='custom_fields'?'':r.key.slice('custom_fields:'.length);
           try{
-            const parsed=JSON.parse(val);
-            // Handle double-encoded legacy data: if parsed is still a string, parse again
-            customFields=typeof parsed==='string'?JSON.parse(parsed):parsed;
-          }catch(e){customFields=[];}
-        } else { customFields=[]; }
+            const parsed=JSON.parse(r.value||'[]');
+            cfAllScopes[scope]=typeof parsed==='string'?JSON.parse(parsed):parsed;
+          }catch(e){cfAllScopes[scope]=[];}
+        });
+        cfActiveScope='';
+        customFields=cfAllScopes['']||[];
+        populateCFScopeSelector();
         renderCustomFields();
-      }).catch(()=>{customFields=[];renderCustomFields();});
+      }).catch(()=>{cfAllScopes={};customFields=[];populateCFScopeSelector();renderCustomFields();});
   } else {
-    try{customFields=JSON.parse(localStorage.getItem(`atp_cf_${activeCompanyId||'_'}`)||'[]');}
-    catch(e){customFields=[];}
+    try{cfAllScopes=JSON.parse(localStorage.getItem(`atp_cf_${activeCompanyId||'_'}`)||'{}');}
+    catch(e){cfAllScopes={};}
+    cfActiveScope='';
+    customFields=cfAllScopes['']||[];
+    populateCFScopeSelector();
     renderCustomFields();
   }
 }
 
-function saveCustomFields(){
-  // Pass the raw array — saveCompanyConfig handles JSON.stringify internally
-  if(activeCompanyId){
-    saveCompanyConfig(activeCompanyId,'custom_fields',customFields);
+// Populates the "Company Default / per-project" dropdown on the Setup screen
+// from whatever projects exist under the active company.
+function populateCFScopeSelector(){
+  const sel=document.getElementById('cf-scope-sel');
+  if(!sel)return;
+  const projOpts=(allProjects||[]).filter(p=>p.company_id===activeCompanyId)
+    .map(p=>`<option value="${p.id}" ${cfActiveScope===p.id?'selected':''}>📁 ${p.name}${cfAllScopes[p.id]?'':' (using default)'}</option>`).join('');
+  sel.innerHTML=`<option value="" ${cfActiveScope===''?'selected':''}>🏢 Company Default (all projects)</option>`+projOpts;
+}
+
+// Called when the admin switches which scope they're viewing/editing on the
+// Setup screen. If the chosen project has no override yet, start the editor
+// from a COPY of the company default as a starting point — saving from here
+// then forks that project's set independently; it does not modify the default.
+function switchCFScope(scope){
+  cfActiveScope=scope;
+  if(scope===''){
+    customFields=cfAllScopes['']||[];
   } else {
-    localStorage.setItem('atp_cf__',JSON.stringify(customFields));
+    customFields=cfAllScopes[scope]?[...cfAllScopes[scope]]:[...(cfAllScopes['']||[])];
   }
+  renderCustomFields();
+}
+
+function saveCustomFields(){
+  const key=cfActiveScope?('custom_fields:'+cfActiveScope):'custom_fields';
+  cfAllScopes[cfActiveScope]=customFields;
+  if(activeCompanyId){
+    saveCompanyConfig(activeCompanyId,key,customFields);
+  } else {
+    localStorage.setItem(`atp_cf_${activeCompanyId||'_'}`,JSON.stringify(cfAllScopes));
+  }
+  populateCFScopeSelector();
 }
 
 function renderCustomFields(){
