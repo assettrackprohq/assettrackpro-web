@@ -3045,6 +3045,16 @@ function renderAudit(){
 // ══════════════════════════════════════════════════════
 // SPOOL — field user's personal export of what they captured
 // ══════════════════════════════════════════════════════
+// Safely resolve an asset's custom_fields into a plain object, regardless of
+// whether it arrived as a JSON string (from the DB) or already-parsed object.
+function _parseCF(a){
+  if(!a||!a.custom_fields)return{};
+  if(typeof a.custom_fields==='string'){
+    try{return JSON.parse(a.custom_fields)||{};}catch(e){return{};}
+  }
+  return a.custom_fields;
+}
+
 function renderSpool(){
   document.getElementById('sp-reg').textContent=sessionAssets.length;
   document.getElementById('sp-aud').textContent=sessionAudit.length;
@@ -3088,6 +3098,15 @@ function renderSpool(){
     const gpsLine=a.capture_location
       ?'<div style="font-size:9px;color:var(--text3);margin-top:1px;">&#x1F4CD; '+a.capture_location+'</div>'
       :'';
+    // Compact "Label: value" line for whatever custom fields (e.g. Capacity)
+    // this company has defined and this asset actually has values for —
+    // previously the Spool card showed nothing about custom fields at all.
+    const cfVals=_parseCF(a);
+    const cfPairs=(customFields||[]).filter(f=>cfVals[f.key]!=null&&cfVals[f.key]!=='')
+      .map(f=>(f.label||f.key)+': '+(f.type==='checkbox'?(cfVals[f.key]?'Yes':'No'):cfVals[f.key]));
+    const cfLine=cfPairs.length
+      ?'<div style="font-size:9px;color:var(--acc5);margin-top:1px;">&#x1F3F7; '+cfPairs.join(' · ')+'</div>'
+      :'';
     return '<div class="aud-item" id="spool-item-'+a.id+'">'+th
       +'<div class="aud-inf">'
       +'<div class="aud-nm">'+a.name+synced+apvPill+'</div>'
@@ -3095,6 +3114,7 @@ function renderSpool(){
       +'<div style="font-size:9px;color:var(--text3);margin-top:1px;">'+(a.department||'—')+' · '+a.condition+'</div>'
       +commentLine
       +gpsLine
+      +cfLine
       +'</div>'
       +'<div style="display:flex;align-items:center;">'
       +'<span class="badge '+(getStatCls(a.status))+'" style="font-size:9px;padding:3px 7px;border-radius:5px;">'+a.status+'</span>'
@@ -3234,12 +3254,15 @@ function spoolDeleteAsset(id){
 
 function spoolCSV(){
   if(!sessionAssets.length){toast('No captures in this session','err');return;}
+  const cfCols=customFields||[];
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
     'Status','Condition','Custodian','Serial','Parent Barcode','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
     'GPS Latitude','GPS Longitude','GPS Location',
-    'Registered By','Date Captured','Cloud Synced'];
+    'Registered By','Date Captured','Cloud Synced',...cfCols.map(f=>f.label||f.key)];
   const rows=sessionAssets.map(function(a){
+    const cf=_parseCF(a);
+    const cfVals=cfCols.map(f=>f.type==='checkbox'?(cf[f.key]?'Yes':'No'):(cf[f.key]!=null?cf[f.key]:''));
     return [
       currentProjectName||'',
       a.barcode, a.name, a.category||'', a.sub_category||'',
@@ -3250,7 +3273,7 @@ function spoolCSV(){
       a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
       a.registered_by||'',
       a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
-      a._synced?'Yes':'No'
+      a._synced?'Yes':'No',...cfVals
     ].map(function(v){return '"'+String(v||'').replace(/"/g,'""')+'"';}).join(',');
   });
   const filename='Spool_'+currentUser.username+'_'+new Date().toISOString().split('T')[0]+'.csv';
