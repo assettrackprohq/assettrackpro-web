@@ -2080,6 +2080,7 @@ function persistHistory(asset, cloudSaved){
       capture_location:asset.capture_location||null,
       notes:asset.notes||null,
       parent_barcode:asset.parent_barcode||null,
+      custom_fields:asset.custom_fields||null,
     };
     if(existingIdx>=0){
       // Update in place — don't add a second entry
@@ -2329,12 +2330,20 @@ function exportHistoryCSV(){
   // on-device history store.
   const hist=getScopedHistory();
   if(!hist.length){toast('No history to export','err');return;}
+  // Union of custom field columns across every project represented in this
+  // history (mirrors spoolCSV()'s approach), defaults first.
+  const seenCF={}; const cfCols=[];
+  function _addCF(list){(list||[]).forEach(f=>{if(!seenCF[f.key]){seenCF[f.key]=1;cfCols.push(f);}});}
+  _addCF(cfAllScopes['']);
+  Array.from(new Set(hist.map(a=>a.project_id).filter(Boolean))).forEach(pid=>_addCF(cfAllScopes[pid]));
   const h=['Project','Barcode','Asset Name','Category','Sub-Category','Location','Department',
     'Status','Condition','Custodian','Serial','Parent Barcode','Notes',
     'Approval Status','Approval Comment','Approved By','Approved At',
     'GPS Latitude','GPS Longitude','GPS Location',
-    'Registered By','Date Captured','Cloud Synced'];
+    'Registered By','Date Captured','Cloud Synced',...cfCols.map(f=>f.label||f.key)];
   const rows=hist.map(function(a){
+    const cf=_parseCF(a);
+    const cfVals=cfCols.map(f=>f.type==='checkbox'?(cf[f.key]?'Yes':'No'):(cf[f.key]!=null?cf[f.key]:''));
     return [
       a.project_name||'',
       a.barcode, a.name, a.category||'', a.sub_category||'',
@@ -2345,7 +2354,7 @@ function exportHistoryCSV(){
       a.capture_lat||'', a.capture_lng||'', a.capture_location||'',
       a.registered_by||'',
       a.created_at?new Date(a.created_at).toLocaleString('en-GB'):'',
-      a.cloud?'Yes':'No'
+      a.cloud?'Yes':'No',...cfVals
     ].map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');
   });
   const projTag=currentProjectName?currentProjectName.replace(/[^a-z0-9]+/gi,'')+'_':'';
@@ -2721,6 +2730,16 @@ function resetForm(){
   // were already untouched by this function before this change.
   document.getElementById('f-status').value=STATUS_OPTIONS[0]||'Active';
   document.getElementById('f-cond').value=CONDITION_OPTIONS[1]||CONDITION_OPTIONS[0]||'Good';
+  // Custom field values (e.g. Capacity) DO need to clear every time, unlike
+  // Category/Location — a value like a specific battery's capacity is
+  // per-unit data, not a batch-level constant, so carrying it forward would
+  // silently mis-tag every asset after the first with the previous one's value.
+  (customFields||[]).forEach(f=>{
+    const el=document.getElementById('cf_'+f.key);
+    if(!el)return;
+    if(f.type==='checkbox') el.checked=false;
+    else el.value='';
+  });
   for(let i=0;i<3;i++){
     const s=document.getElementById('ps'+i);
     s.className='pslot';
