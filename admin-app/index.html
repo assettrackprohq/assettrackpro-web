@@ -376,7 +376,6 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
   <button class="ls-btn" onclick="doLogin()">Access Admin Portal →</button>
   <div class="ls-err" id="ls-err"></div>
   <div class="gps-stamp" id="login-gps-stamp" style="display:none;max-width:380px;text-align:center;justify-content:center;"></div>
-  <div class="ls-link">Field app? <a href="field.html">Go to Field Portal →</a></div>
   <div class="ls-version" id="ls-version-stamp"></div>
 </div>
 
@@ -435,6 +434,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       <button class="nav-item" onclick="show('locations')"><span class="ni">📍</span>Locations & Depts</button>
       <button class="nav-item" onclick="show('customfields')"><span class="ni">🧩</span>Custom Fields</button>
       <button class="nav-item" onclick="show('import')"><span class="ni">📥</span>Import Data</button>
+      <button class="nav-item" onclick="show('backup')" id="nav-backup" data-admin-only><span class="ni">💾</span>Backup &amp; Restore</button>
       <div class="sb-sect">Data & Integrations</div>
       <button class="nav-item" onclick="show('activity')"><span class="ni">📜</span>Activity History</button>
       <button class="nav-item" onclick="show('reports')"><span class="ni">📋</span>Reports & Export</button>
@@ -971,6 +971,34 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
       </div>
       <div id="cf-list" style="display:flex;flex-direction:column;gap:10px;">
         <div style="text-align:center;padding:40px;color:var(--text3);font-size:13px;">No custom fields defined yet — click Add Field to create one.</div>
+      </div>
+    </div>
+
+    <!-- ══ BACKUP & RESTORE ══ -->
+    <div class="panel" id="p-backup">
+      <div class="panel-hdr">
+        <div><div class="panel-ttl">Backup &amp; Restore</div><div class="panel-sub">Download a full snapshot of this company's data, or restore one back</div></div>
+      </div>
+      <div id="backup-scope-note" style="background:var(--surf2);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--text2);"></div>
+
+      <div class="card" style="padding:18px;margin-bottom:16px;">
+        <div style="font-size:13px;font-weight:800;margin-bottom:4px;">📦 Backup</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+          Downloads one JSON file containing this company's assets, users, projects, project assignments, taxonomy, locations, departments, custom field definitions (default and per-project), and other settings.
+          <strong style="color:var(--acc2);">This file will contain user login records (password hashes, not plain passwords) — store it securely.</strong>
+        </div>
+        <button class="btn-acc" onclick="runBackup()" id="backup-btn">⬇ Download Backup</button>
+      </div>
+
+      <div class="card" style="padding:18px;">
+        <div style="font-size:13px;font-weight:800;margin-bottom:4px;">📤 Restore</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+          Restores from a previously downloaded backup file. Restoring only ever ADDS or UPDATES records that exist in the backup (matched by ID) — it never deletes anything created since the backup was taken.
+          A backup can only be restored into the <strong>same company</strong> it was taken from.
+          <br><strong style="color:var(--acc2);">Note:</strong> a user's login credentials live in Supabase's own authentication system, separate from this data — restoring a user record recovers their profile/role, but cannot recreate a login that was fully deleted.
+        </div>
+        <input type="file" id="restore-file-input" accept="application/json" style="display:none;" onchange="handleRestoreFileSelected(this.files[0])">
+        <button class="btn-ghost" onclick="document.getElementById('restore-file-input').click()">⬆ Choose Backup File…</button>
       </div>
     </div>
 
@@ -2484,6 +2512,22 @@ let allAssignments=[];     // project_assignments for active company
 // ── Multi-company state ──
 let allCompanies=[];          // all company records
 let activeCompanyId=null;     // currently selected workspace
+// Backup & Restore is Super Owner-controlled: always available to
+// super_owner, and available to a company's own admin/sub_admin only when
+// the Super Owner has explicitly enabled it for that company (toggle lives
+// on the company edit modal, stored as config key 'backup_restore_enabled').
+let backupRestoreEnabled=false;
+
+function updateBackupNavVisibility(){
+  const btn=document.getElementById('nav-backup');
+  if(!btn)return;
+  const role=currentUser&&currentUser.role;
+  // Explicitly admin/super_owner only — sub_admin, field, and auditor roles
+  // must never see this regardless of the company flag, matching the "Super
+  // Owner can enable it for [an] admin" wording exactly (not sub-admins).
+  const eligible=role==='super_owner'||(role==='admin'&&backupRestoreEnabled);
+  btn.style.display=eligible?'':'none';
+}
 let activeCompany=null;       // full company object
 let blockedModulePanels=[];   // panels blocked by tenant module toggles (rebuilt on login/workspace switch)
 
@@ -2698,6 +2742,7 @@ async function switchWorkspace(companyId){
   // Reload config for this company (includes sheets_config)
   await loadCompanyConfig(companyId);
   loadCustomFields();
+  updateBackupNavVisibility();
   // Reload assets for this company
   if(CONFIGURED){
     try{allAssets=await sb.query('assets',`?company_id=eq.${companyId}&select=*&order=created_at.desc`);if(!Array.isArray(allAssets))allAssets=[];}catch(e){}
@@ -2728,6 +2773,11 @@ async function switchWorkspace(companyId){
 }
 
 async function loadCompanyConfig(companyId){
+  // Reset per-company flags that default to false/off, so switching to a
+  // company with no explicit config for them doesn't inherit the PREVIOUS
+  // company's value. (Super Owner always has access regardless of this flag —
+  // see updateBackupNavVisibility().)
+  backupRestoreEnabled=false;
   // Load taxonomy, locations, departments for this specific company
   if(CONFIGURED){
     try{
@@ -2744,6 +2794,7 @@ async function loadCompanyConfig(companyId){
           if(r.key==='status_options'&&Array.isArray(parsed))STATUS_OPTIONS=parsed;
           if(r.key==='condition_options'&&Array.isArray(parsed))CONDITION_OPTIONS=parsed;
           if(r.key==='custom_fields'&&Array.isArray(parsed))CUSTOM_FIELDS=parsed;
+          if(r.key==='backup_restore_enabled')backupRestoreEnabled=(parsed===true);
           if(r.key==='sheets_config'&&typeof parsed==='object'){
             gsSheetsConfig=parsed;
             // Update ERP status badge if visible
@@ -3033,9 +3084,18 @@ async function saveNewCompany(){
   show('companies');
 }
 
-function editCompany(id){
+async function editCompany(id){
   const c=allCompanies.find(x=>x.id===id);
   if(!c)return;
+  // backup_restore_enabled lives in `config`, not on the companies row itself
+  // — fetch it before rendering so the toggle reflects the real current state.
+  let backupEnabled=false;
+  try{
+    const rows=await sb.query('config',`?company_id=eq.${id}&key=eq.backup_restore_enabled&select=value`);
+    if(Array.isArray(rows)&&rows.length){
+      try{const p=JSON.parse(rows[0].value);backupEnabled=(typeof p==='string'?JSON.parse(p):p)===true;}catch(e){}
+    }
+  }catch(e){}
   const industryOpts=[...Object.keys(INDUSTRY_TEMPLATES),'Oil & Gas','Education','Government','Financial Services','Hospitality','Logistics','Real Estate','Telecommunications','NGO','Other'].map(i=>`<option ${i===c.industry?'selected':''}>${i}</option>`).join('');
   const currencyOpts=['NGN','USD','GBP','EUR','GHS','KES','ZAR','OTHER'].map(cur=>`<option value="${cur}" ${cur===(c.currency||'NGN')?'selected':''}>${cur}</option>`).join('');
   const fyOpts=['December','March','June','September'].map(m=>`<option ${m===(c.fy_end||'December')?'selected':''}>${m}</option>`).join('');
@@ -3081,6 +3141,13 @@ function editCompany(id){
           <option value="1" ${(c.tier||0)==1?'selected':''}>🔵 PRO — up to 20,000 assets</option>
           <option value="2" ${(c.tier||0)==2?'selected':''}>🟢 ENTERPRISE — unlimited</option>
         </select></div>
+
+      <div class="fg" style="grid-column:1/-1;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);cursor:pointer;">
+          <input type="checkbox" id="eco-backup-enabled" ${backupEnabled?'checked':''}>
+          Allow this company's Admin to use Backup &amp; Restore (Super Owner always has access regardless)
+        </label>
+      </div>
     </div>
 
     <div class="modal-acts">
@@ -3122,6 +3189,11 @@ async function saveEditCompany(id){
   const idx=allCompanies.findIndex(c=>c.id===id);
   if(idx>=0)allCompanies[idx]={...allCompanies[idx],...updates};
   if(activeCompanyId===id)activeCompany={...activeCompany,...updates};
+  // backup_restore_enabled lives in `config`, saved separately from the
+  // companies row itself.
+  const backupChecked=document.getElementById('eco-backup-enabled')?document.getElementById('eco-backup-enabled').checked:false;
+  await saveCompanyConfig(id,'backup_restore_enabled',backupChecked);
+  if(activeCompanyId===id){backupRestoreEnabled=backupChecked;updateBackupNavVisibility();}
   closeModal();toast('Company updated','ok');
   populateWorkspaceSelector();renderCompanies();
 }
@@ -3790,6 +3862,7 @@ async function initAdmin(){
   }
 
   // ── Step 5: Set Live/Demo connection badge ──
+  updateBackupNavVisibility();
   updateConnBadge();
 
   // ── Step 6: Render everything ──
@@ -4019,6 +4092,15 @@ function show(name){
     toast('⛔ This section is restricted to Super Owner access only','err');
     return;
   }
+  // Backup & Restore: Super Owner always; a company's own `admin` only if
+  // the Super Owner has explicitly enabled it for that company. sub_admin,
+  // field and auditor roles are never eligible regardless of the flag.
+  if(name==='backup' && currentUser && currentUser.role!=='super_owner'){
+    if(currentUser.role!=='admin' || !backupRestoreEnabled){
+      toast('⛔ Backup & Restore is restricted to Super Owner, or an Admin it has been enabled for','err');
+      return;
+    }
+  }
   if(typeof currentUser!=='undefined'&&currentUser&&currentUser.role==='sub_admin'&&SUB_ADMIN_BLOCKED.includes(name)){
     toast('Access restricted for Sub-Admin role','err');return;
   }
@@ -4034,7 +4116,13 @@ function show(name){
   const pEl=document.getElementById('p-'+name);if(pEl)pEl.classList.add('on');
   const ni=document.querySelector(`.nav-item[onclick="show('${name}')"]`);
   if(ni)ni.classList.add('on');
-  const sb=document.getElementById('sidebar');if(sb)sb.classList.remove('open');
+  // NOTE: was previously named `sb` — silently shadowed the global `sb` REST
+  // client for the rest of this function, so the 'assets' branch below's
+  // sb.query(...) call was throwing a TypeError against this DOM element
+  // every time (console-only, never surfaced to the user), meaning the
+  // Assets screen never actually refetched fresh data on navigation — it
+  // just kept re-rendering whatever `allAssets` already held from login.
+  const sidebarEl=document.getElementById('sidebar');if(sidebarEl)sidebarEl.classList.remove('open');
   // Panel-specific init
   if(name==='activity'){loadActivityHistory();}
   if(name==='superowner'){renderSuperOwner();}
@@ -4054,6 +4142,10 @@ function show(name){
   if(name==='taxonomy'){populateTaxonomyEditor();}
   if(name==='setup'){renderPermMatrix();renderStatusConditionTags();}
   if(name==='customfields'){populateCFScopeSelector();renderCustomFields();}
+  if(name==='backup'){
+    const note=document.getElementById('backup-scope-note');
+    if(note)note.textContent='📁 Scoped to: '+((activeCompany&&activeCompany.name)||'current workspace');
+  }
   if(name==='import'){initImportPanel();}
 }
 
@@ -6686,6 +6778,196 @@ function moveCF(i,dir){
   [customFields[i],customFields[j]]=[customFields[j],customFields[i]];
   saveCustomFields();
   renderCustomFields();
+}
+
+// ── BACKUP & RESTORE ────────────────────────────────────────────────────
+// Access is gated in show() and updateBackupNavVisibility() — Super Owner
+// always, or a company's own `admin` only once the Super Owner has enabled
+// it for that company via the toggle on the company edit modal.
+
+async function runBackup(){
+  if(!activeCompanyId){toast('No active company selected','err');return;}
+  const btn=document.getElementById('backup-btn');
+  if(btn){btn.disabled=true;btn.textContent='Gathering data…';}
+  try{
+    const cid=activeCompanyId;
+    // Fetch fresh from the database rather than relying on in-memory arrays,
+    // so the backup is a true point-in-time snapshot, not stale UI state.
+    const [companyRows,assets,users,projects,assignments,config]=await Promise.all([
+      sb.query('companies',`?id=eq.${cid}&select=*`),
+      sb.query('assets',`?company_id=eq.${cid}&select=*`),
+      sb.query('users',`?company_id=eq.${cid}&select=*`),
+      sb.query('projects',`?company_id=eq.${cid}&select=*`),
+      sb.query('project_assignments',`?company_id=eq.${cid}&select=*`),
+      sb.query('config',`?company_id=eq.${cid}&select=*`),
+    ]);
+    const backup={
+      atp_backup_version:1,
+      exported_at:new Date().toISOString(),
+      exported_by:currentUser?currentUser.username:'unknown',
+      company_id:cid,
+      company_name:(activeCompany&&activeCompany.name)||(Array.isArray(companyRows)&&companyRows[0]&&companyRows[0].name)||cid,
+      counts:{
+        assets:Array.isArray(assets)?assets.length:0,
+        users:Array.isArray(users)?users.length:0,
+        projects:Array.isArray(projects)?projects.length:0,
+        project_assignments:Array.isArray(assignments)?assignments.length:0,
+        config:Array.isArray(config)?config.length:0,
+      },
+      data:{
+        company:Array.isArray(companyRows)?companyRows[0]:null,
+        assets:Array.isArray(assets)?assets:[],
+        users:Array.isArray(users)?users:[],
+        projects:Array.isArray(projects)?projects:[],
+        project_assignments:Array.isArray(assignments)?assignments:[],
+        config:Array.isArray(config)?config:[],
+      }
+    };
+    const json=JSON.stringify(backup,null,2);
+    const safeName=(backup.company_name||'company').replace(/[^a-z0-9]+/gi,'_');
+    const filename=`AssetTrackPro_Backup_${safeName}_${new Date().toISOString().slice(0,10)}.json`;
+    const blob=new Blob([json],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=filename;document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(url);
+    toast('Backup downloaded ✓','ok');
+  }catch(e){
+    toast('Backup failed: '+e.message,'err');
+    logErr('runBackup',e.message,'company='+activeCompanyId);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='⬇ Download Backup';}
+  }
+}
+
+function handleRestoreFileSelected(file){
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async function(e){
+    let backup;
+    try{ backup=JSON.parse(e.target.result); }
+    catch(err){ toast('That file is not valid JSON — is it really a backup file?','err'); return; }
+    if(!backup||typeof backup!=='object'||!backup.atp_backup_version||!backup.data){
+      toast('This does not look like an AssetTrackPro backup file','err');
+      return;
+    }
+    if(backup.company_id!==activeCompanyId){
+      toast('This backup was taken from a different company ('+(backup.company_name||backup.company_id)+') — switch to that company\'s workspace first, or it must be restored there','err');
+      return;
+    }
+    await confirmAndRunRestore(backup);
+  };
+  reader.onerror=function(){toast('Could not read that file','err');};
+  reader.readAsText(file);
+  document.getElementById('restore-file-input').value='';
+}
+
+async function confirmAndRunRestore(backup){
+  const cid=activeCompanyId;
+  let existingCounts={assets:0,users:0,projects:0,project_assignments:0,config:0};
+  try{
+    const [a,u,p,pa,c]=await Promise.all([
+      sb.query('assets',`?company_id=eq.${cid}&select=id`),
+      sb.query('users',`?company_id=eq.${cid}&select=id`),
+      sb.query('projects',`?company_id=eq.${cid}&select=id`),
+      sb.query('project_assignments',`?company_id=eq.${cid}&select=id`),
+      sb.query('config',`?company_id=eq.${cid}&select=id`),
+    ]);
+    existingCounts={
+      assets:Array.isArray(a)?a.length:0, users:Array.isArray(u)?u.length:0,
+      projects:Array.isArray(p)?p.length:0, project_assignments:Array.isArray(pa)?pa.length:0,
+      config:Array.isArray(c)?c.length:0,
+    };
+  }catch(e){/* proceed with zeros if this check fails — restore itself will still be safe (upsert-by-id) */}
+  const hasExisting=Object.values(existingCounts).some(n=>n>0);
+  const bc=backup.counts||{};
+  // Stash the parsed backup rather than embedding it inline in the button's
+  // onclick — a backup with thousands of assets as an inline HTML attribute
+  // string would be fragile (quoting, size) and slow to parse twice.
+  window._pendingRestoreBackup=backup;
+  const rows=(label,key)=>`<tr><td style="padding:4px 10px 4px 0;color:var(--text2);">${label}</td><td style="padding:4px 10px;text-align:center;">${existingCounts[key]||0}</td><td style="padding:4px 0;text-align:center;font-weight:700;color:var(--acc);">${bc[key]||0}</td></tr>`;
+  openModal(`
+    <div class="modal-ttl">⚠ Confirm Restore</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">
+      Restoring <strong>${backup.company_name||backup.company_id}</strong>'s backup from
+      ${backup.exported_at?new Date(backup.exported_at).toLocaleString('en-GB'):'an unknown date'}.
+      ${hasExisting?'<strong style="color:var(--acc2);">This company already has data.</strong> Restoring will UPDATE any record whose ID matches the backup, and ADD any record in the backup that does not currently exist. It will NOT delete anything created since this backup was taken.':'This company currently has no data — this will be a straightforward recovery.'}
+    </div>
+    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:16px;">
+      <tr style="font-weight:800;color:var(--text3);"><td>Record type</td><td style="text-align:center;">Currently here</td><td style="text-align:center;">In backup</td></tr>
+      ${rows('Assets','assets')}
+      ${rows('Users','users')}
+      ${rows('Projects','projects')}
+      ${rows('Project Assignments','project_assignments')}
+      ${rows('Config rows','config')}
+    </table>
+    <div class="modal-acts">
+      <button class="act-btn btn-s" onclick="window._pendingRestoreBackup=null;closeModal()">Cancel</button>
+      <button class="act-btn btn-d" onclick="closeModal();runRestore()">⚠ Restore Now</button>
+    </div>
+  `);
+}
+
+async function _bulkUpsert(table, rows){
+  if(!rows||!rows.length)return{ok:true};
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=id`,{
+    method:'POST',
+    headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),
+             'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
+    body:JSON.stringify(rows)
+  });
+  if(!r.ok){const t=await r.text();return{ok:false,error:`${table} ${r.status}: ${t}`};}
+  return{ok:true};
+}
+
+async function runRestore(){
+  const backup=window._pendingRestoreBackup;
+  window._pendingRestoreBackup=null;
+  if(!backup){toast('Nothing to restore — please choose the file again','err');return;}
+  const d=backup.data||{};
+  toast('Restoring — please wait…','info');
+  const errors=[];
+  // Assets, users, projects, project_assignments: straightforward upsert-by-id
+  // since a restore only ever targets the SAME company it came from (enforced
+  // in handleRestoreFileSelected), so these IDs are meaningful here.
+  const r1=await _bulkUpsert('projects',d.projects);
+  if(!r1.ok)errors.push(r1.error);
+  const r2=await _bulkUpsert('assets',d.assets);
+  if(!r2.ok)errors.push(r2.error);
+  const r3=await _bulkUpsert('users',d.users);
+  if(!r3.ok)errors.push(r3.error);
+  const r4=await _bulkUpsert('project_assignments',d.project_assignments);
+  if(!r4.ok)errors.push(r4.error);
+  // Config rows are matched by (company_id, key) via saveCompanyConfig's own
+  // PATCH-else-POST logic, NOT by raw id — a config row's id may not be
+  // stable if it was ever deleted and recreated, but (company_id, key) is
+  // always the real identity of a config row in this app.
+  for(const row of (d.config||[])){
+    try{
+      let val;
+      try{val=JSON.parse(row.value);}catch(e){val=row.value;}
+      if(typeof val==='string'){try{val=JSON.parse(val);}catch(e){/* leave as string */}}
+      await saveCompanyConfig(activeCompanyId,row.key,val);
+    }catch(e){errors.push('config['+row.key+']: '+e.message);}
+  }
+  if(errors.length){
+    toast('Restore finished with '+errors.length+' error(s) — check Error Log','err');
+    errors.forEach(e=>logErr('runRestore',e,'company='+activeCompanyId));
+  } else {
+    toast('Restore complete ✓','ok');
+  }
+  // Refresh everything from the now-restored data
+  if(activeCompanyId){
+    try{
+      allAssets=await sb.query('assets',`?company_id=eq.${activeCompanyId}&select=*&order=created_at.desc`);
+      allUsers=await sb.query('users',`?company_id=eq.${activeCompanyId}&select=*`);
+      allProjects=await sb.query('projects',`?company_id=eq.${activeCompanyId}&select=*&order=created_at.desc`);
+      allAssignments=await sb.query('project_assignments',`?company_id=eq.${activeCompanyId}&select=*`);
+    }catch(e){}
+    await loadCompanyConfig(activeCompanyId);
+    loadCustomFields();
+    updateBackupNavVisibility();
+  }
 }
 
 // ── IMPORT DATA ─────────────────────────────────────────────────────────
