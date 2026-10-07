@@ -362,6 +362,10 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
 <body>
 
 <!-- LOGIN -->
+<div id="session-restore-screen" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;background:var(--bg,#0a1e38);color:#fff;">
+  <div class="ls-logo">AssetTrack<em>Pro</em></div>
+  <div style="font-size:12px;opacity:.7;">Restoring your session…</div>
+</div>
 <div id="login-screen">
   <div class="ls-logo">AssetTrack<em>Pro</em></div>
   <div class="ls-badge">ADMIN PORTAL</div>
@@ -1948,6 +1952,67 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const CONFIGURED = SUPABASE_URL !== 'YOUR_SUPABASE_URL';
 let sbSession=null; // real Supabase Auth session, set after atp-login succeeds
 function authToken(){ return (sbSession&&sbSession.access_token)?sbSession.access_token:SUPABASE_ANON_KEY; }
+
+// ══════════════════════════════════════════════════════
+// SESSION RESTORE — survive a page refresh without forcing re-login.
+// Runs once on page load. Shows #session-restore-screen while checking,
+// then either lands straight in the app (via the normal completeLogin()
+// path) or falls back to the login form if there's nothing valid to restore.
+// ══════════════════════════════════════════════════════
+async function tryRestoreSession(){
+  const finish=()=>{ const el=document.getElementById('session-restore-screen'); if(el) el.style.display='none'; };
+  if(!CONFIGURED){ finish(); return; } // demo mode has no real session to restore
+  let stored;
+  try{ stored=JSON.parse(localStorage.getItem('atp_admin_auth')||'null'); }
+  catch(e){ localStorage.removeItem('atp_admin_auth'); finish(); return; }
+  if(!stored||!stored.session||!stored.user){ finish(); return; }
+
+  let session=stored.session;
+  const now=Math.floor(Date.now()/1000);
+  // Refresh if the access token is missing an expiry, or expires within 60s
+  if(!session.expires_at || session.expires_at < now+60){
+    try{
+      const r=await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,{
+        method:'POST',
+        headers:{'apikey':SUPABASE_ANON_KEY,'Content-Type':'application/json'},
+        body:JSON.stringify({refresh_token:session.refresh_token})
+      });
+      if(!r.ok){ localStorage.removeItem('atp_admin_auth'); finish(); return; }
+      const data=await r.json();
+      if(!data.access_token){ localStorage.removeItem('atp_admin_auth'); finish(); return; }
+      // Supabase rotates refresh tokens — the OLD one is now invalid, so the
+      // new one must be the one saved back, or the next refresh attempt fails.
+      session={access_token:data.access_token, refresh_token:data.refresh_token, expires_at:data.expires_at};
+    }catch(e){
+      // Network hiccup trying to refresh — fall back to the login form rather
+      // than silently retrying forever; the person can just log in again.
+      finish(); return;
+    }
+  }
+
+  sbSession=session;
+  // Re-validate against the DB rather than blindly trusting the cached user —
+  // catches a deactivated account or a role change since the last real login.
+  let freshUser=stored.user;
+  try{
+    const rows=await sb.query('users',`?id=eq.${stored.user.id}&select=id,username,name,role,company_id,active,is_first_login,assigned_locations,created_at`);
+    if(Array.isArray(rows)&&rows.length){
+      if(rows[0].active===false){ localStorage.removeItem('atp_admin_auth'); sbSession=null; finish(); return; }
+      freshUser=rows[0];
+    } else {
+      // user no longer exists
+      localStorage.removeItem('atp_admin_auth'); sbSession=null; finish(); return;
+    }
+  }catch(e){
+    // Connectivity blip during the validation check — proceed with the
+    // cached profile rather than booting someone off over a brief outage.
+  }
+
+  localStorage.setItem('atp_admin_auth', JSON.stringify({session, user:freshUser}));
+  completeLogin(freshUser);
+  finish();
+}
+document.addEventListener('DOMContentLoaded', tryRestoreSession);
 
 // ── AUDITOR QR MODAL ──
 // Generates a signed, read-only audit link for an asset and displays
@@ -3773,7 +3838,18 @@ function captureLoginGPS(user){
   {timeout:8000,maximumAge:60000});
 }
 
+// Persists the real Supabase Auth session + user profile so a page refresh
+// doesn't force a full re-login. Demo mode (no CONFIGURED/no real sbSession)
+// is deliberately never persisted — there's no real token to restore there.
+function _persistSession(user){
+  if(!CONFIGURED||!sbSession)return;
+  try{
+    localStorage.setItem('atp_admin_auth', JSON.stringify({session:sbSession, user}));
+  }catch(e){ /* storage full/unavailable — session just won't survive a refresh */ }
+}
+
 function completeLogin(user){
+  _persistSession(user);
   currentUser=user;
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('main-app').style.display='flex';
@@ -3807,6 +3883,8 @@ function completeLogin(user){
 }
 
 function doLogout(){
+  localStorage.removeItem('atp_admin_auth');
+  sbSession=null;
   currentUser=null;allAssets=[];allUsers=[];allProjects=[];allAssignments=[];pendingFirstLoginUser=null;
   LICENCE_GATE_ACTIVE=false;
   const banner=document.getElementById('licence-gate-banner');
