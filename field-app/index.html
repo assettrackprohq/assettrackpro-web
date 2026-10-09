@@ -1311,11 +1311,11 @@ async function checkTenantAccessAtLogin(user){
         const projIds=assignRes.map(a=>a.project_id);
         window._userProjLocs={};
         assignRes.forEach(a=>{window._userProjLocs[a.project_id]=Array.isArray(a.assigned_locations)?a.assigned_locations:[];});
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations,active_locations`);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations,active_locations,departments,active_departments`);
         userProjects=Array.isArray(allProjRes)?allProjRes.filter(p=>projIds.includes(p.id)):[];
       } else {
         window._userProjLocs={};
-        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations,active_locations`);
+        const allProjRes=await sb.query('projects',`?company_id=eq.${encodeURIComponent(user.company_id)}&status=eq.active&select=id,name,description,status,start_date,end_date,industry_template,taxonomy,locations,active_locations,departments,active_departments`);
         userProjects=Array.isArray(allProjRes)?allProjRes:[];
       }
     }catch(e){ userProjects=[]; console.warn('projectFetch:',e.message); }
@@ -1495,8 +1495,29 @@ function _persistSession(){
   }catch(e){ /* storage full/unavailable — session just won't survive a refresh */ }
 }
 
+// ══════════════════════════════════════════════════════
+// IDLE TIMEOUT — auto-logout after 10 minutes of no activity.
+// Resets on any mouse/keyboard/touch/scroll interaction while logged in.
+// ══════════════════════════════════════════════════════
+const IDLE_TIMEOUT_MS = 10*60*1000;
+let _idleTimer=null;
+function resetIdleTimer(){
+  if(!currentUser)return; // nothing to time out before login
+  clearTimeout(_idleTimer);
+  _idleTimer=setTimeout(_idleLogout, IDLE_TIMEOUT_MS);
+}
+function _idleLogout(){
+  if(!currentUser)return;
+  doLogout();
+  toast('You were logged out after 10 minutes of inactivity','err');
+}
+['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(evt=>{
+  document.addEventListener(evt, resetIdleTimer, {passive:true});
+});
+
 function completeLogin(){
   _persistSession();
+  resetIdleTimer();
   const activeProjects=userProjects.filter(p=>p.status==='active');
   if(activeProjects.length===0){
     currentProjectId=null; currentProjectName=null;
@@ -1609,6 +1630,7 @@ async function loadMyRangeWidget(){
 }
 
 function doLogout(){
+  clearTimeout(_idleTimer);
   localStorage.removeItem('atp_field_auth');
   sbSession=null;
   currentUser=null;sessionAssets=[];sessionAudit=[];sessionFlags=[];
@@ -1874,11 +1896,27 @@ function buildDropdowns(){
   const locSel=document.getElementById('f-loc');
   locSel.innerHTML='<option value="">Select location…</option>';
   visibleLocs.forEach(l=>locSel.innerHTML+=`<option>${l}</option>`);
-  // Departments
+  // Departments / Cost Centres — scoped to the active project
   const deptSel=document.getElementById('f-dept');
   deptSel.innerHTML='<option value="">Select department…</option>';
-  DEPARTMENTS.forEach(d=>deptSel.innerHTML+=`<option>${d}</option>`);
+  getProjectDepartments().forEach(d=>deptSel.innerHTML+=`<option>${d}</option>`);
   buildStatusConditionDropdowns();
+}
+
+// Departments (a.k.a. Cost Centres) available for the active project.
+// Fallback chain mirrors Locations: the project's ACTIVE departments, else
+// all of the project's departments, else the company-wide list — so a
+// project nobody has configured departments for yet keeps working exactly
+// as before instead of showing an empty dropdown.
+function getProjectDepartments(){
+  if(currentProjectId){
+    const proj=userProjects.find(p=>p.id===currentProjectId);
+    const active=Array.isArray(proj?.active_departments)?proj.active_departments:[];
+    if(active.length) return active;
+    const all=Array.isArray(proj?.departments)?proj.departments:[];
+    if(all.length) return all;
+  }
+  return DEPARTMENTS;
 }
 
 // Returns the taxonomy to use for dropdowns — project-specific if available, else company TAXONOMY
@@ -1951,7 +1989,7 @@ function buildAuditLocationDropdown(){
   const visibleLocs=allowedLocs.length?LOCATIONS.filter(l=>allowedLocs.includes(l)):LOCATIONS;
   visibleLocs.forEach(l=>lSel.innerHTML+=`<option>${l}</option>`);
   dSel.innerHTML='<option value="">— No change —</option>';
-  DEPARTMENTS.forEach(d=>dSel.innerHTML+=`<option>${d}</option>`);
+  getProjectDepartments().forEach(d=>dSel.innerHTML+=`<option>${d}</option>`);
 }
 
 function onCat(){
