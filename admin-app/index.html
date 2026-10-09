@@ -934,23 +934,29 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
           <div id="loc-no-proj" style="font-size:11px;color:var(--text3);padding:12px 0;">Select a project above to manage its locations.</div>
         </div>
 
-        <!-- DEPARTMENTS — Company-wide (unchanged) -->
+        <!-- DEPARTMENTS / COST CENTRES — Project-scoped, mirrors Locations -->
         <div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div class="card-ttl" id="depts-hdr" style="margin:0;">🏢 Departments <span style="font-size:10px;font-weight:400;">(company-wide)</span></div>
-            <div style="display:flex;gap:6px;">
-              <button class="act-btn btn-s" style="padding:4px 8px;font-size:10px;" onclick="downloadTemplate('departments')">⬇</button>
-              <button class="act-btn btn-s" style="padding:4px 8px;font-size:10px;" onclick="triggerImport('dept-import-file')">⬆ Import</button>
-              <input type="file" id="dept-import-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="importFile(this,'departments')">
+            <div class="card-ttl" id="depts-hdr" style="margin:0;">🏢 Departments / Cost Centres <span style="font-size:10px;font-weight:400;">(by project)</span></div>
+          </div>
+          <p style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.7;">Departments belong to projects, same as Locations. Use the project selected on the left.</p>
+
+          <div id="dept-proj-section" style="display:none;">
+            <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+              <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="ldSelectAllDepts()">✓ Select All</button>
+              <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="ldClearAllDepts()">✗ Clear All</button>
+              <label class="act-btn btn-s" style="padding:5px 10px;font-size:10px;cursor:pointer;">
+                ⬆ Import <input type="file" id="dept-import-file" accept=".csv,.xlsx,.xls,.txt" style="display:none" onchange="ldImportDepts(this)">
+              </label>
+              <button class="act-btn btn-s" style="padding:5px 10px;font-size:10px;" onclick="ldDownloadDeptTemplate()">⬇ Template</button>
+            </div>
+            <div id="dept-tags" class="tag-grid" style="margin-bottom:10px;"></div>
+            <div class="tag-add-row">
+              <input class="tag-add-inp" type="text" id="dept-inp" placeholder="Add department to this project…" onkeydown="if(event.key==='Enter')addDept()">
+              <button class="tag-add-btn" onclick="addDept()">+ Add</button>
             </div>
           </div>
-          <p style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.7;">Organisational units, cost centres. <em style="color:var(--text2);">Which department owns it?</em></p>
-          <div class="tag-grid" id="dept-tags"></div>
-          <div class="tag-add-row">
-            <input class="tag-add-inp" type="text" id="dept-inp" placeholder="Add department…" onkeydown="if(event.key==='Enter')addDept()">
-            <button class="tag-add-btn" onclick="addDept()">+ Add</button>
-          </div>
-          <div id="dept-import-preview" style="display:none;margin-top:10px;"></div>
+          <div id="dept-no-proj" style="font-size:11px;color:var(--text3);padding:12px 0;">Select a project on the left to manage its departments.</div>
           <div style="margin-top:10px;">
             <button class="act-btn btn-p" style="width:100%;padding:8px;" onclick="saveAllLocsDepts()">💾 Save Locations &amp; Departments (publishes to Field App)</button>
           </div>
@@ -3848,9 +3854,30 @@ function _persistSession(user){
   }catch(e){ /* storage full/unavailable — session just won't survive a refresh */ }
 }
 
+// ══════════════════════════════════════════════════════
+// IDLE TIMEOUT — auto-logout after 10 minutes of no activity.
+// Resets on any mouse/keyboard/touch/scroll interaction while logged in.
+// ══════════════════════════════════════════════════════
+const IDLE_TIMEOUT_MS = 10*60*1000;
+let _idleTimer=null;
+function resetIdleTimer(){
+  if(!currentUser)return; // nothing to time out before login
+  clearTimeout(_idleTimer);
+  _idleTimer=setTimeout(_idleLogout, IDLE_TIMEOUT_MS);
+}
+function _idleLogout(){
+  if(!currentUser)return;
+  doLogout();
+  toast('You were logged out after 10 minutes of inactivity','err');
+}
+['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(evt=>{
+  document.addEventListener(evt, resetIdleTimer, {passive:true});
+});
+
 function completeLogin(user){
   _persistSession(user);
   currentUser=user;
+  resetIdleTimer();
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('main-app').style.display='flex';
   document.getElementById('sb-uname').textContent=user.name||user.username;
@@ -3883,6 +3910,7 @@ function completeLogin(user){
 }
 
 function doLogout(){
+  clearTimeout(_idleTimer);
   localStorage.removeItem('atp_admin_auth');
   sbSession=null;
   currentUser=null;allAssets=[];allUsers=[];allProjects=[];allAssignments=[];pendingFirstLoginUser=null;
@@ -5336,12 +5364,15 @@ function renderLocsDepts(){
   const noProj=document.getElementById('loc-no-proj');
   const saveRow=document.getElementById('loc-save-row');
 
+  const deptProjSection=document.getElementById('dept-proj-section');
+  const deptNoProj=document.getElementById('dept-no-proj');
+
   if(!selectedProjId){
     if(projSection) projSection.style.display='none';
     if(noProj) noProj.style.display='';
     if(saveRow) saveRow.style.display='none';
-    // Render departments regardless
-    _renderDeptTags();
+    if(deptProjSection) deptProjSection.style.display='none';
+    if(deptNoProj) deptNoProj.style.display='';
     return;
   }
 
@@ -5351,6 +5382,8 @@ function renderLocsDepts(){
   if(projSection) projSection.style.display='';
   if(noProj) noProj.style.display='none';
   if(saveRow) saveRow.style.display='';
+  if(deptProjSection) deptProjSection.style.display='';
+  if(deptNoProj) deptNoProj.style.display='none';
 
   const allLocs=Array.isArray(p.locations)?p.locations:[];
   const activeLocs=Array.isArray(p.active_locations)?p.active_locations:[];
@@ -5377,15 +5410,29 @@ function renderLocsDepts(){
     }
   }
 
-  _renderDeptTags();
-}
-
-function _renderDeptTags(){
-  const deptEl=document.getElementById('dept-tags');
-  if(deptEl){
-    deptEl.innerHTML=DEPARTMENTS.length
-      ?DEPARTMENTS.map((d,i)=>`<div class="tag">${d.replace(/&/g,'&amp;').replace(/</g,'&lt;')}<button class="tag-x" onclick="removeDept(${i})">✕</button></div>`).join('')
-      :'<div style="font-size:11px;color:var(--text3);padding:8px 0;">No departments yet.</div>';
+  // Departments — mirrors the Locations per-project active/inactive pattern above.
+  const allDepts=Array.isArray(p.departments)?p.departments:[];
+  const activeDepts=Array.isArray(p.active_departments)?p.active_departments:[];
+  const deptTags=document.getElementById('dept-tags');
+  if(deptTags){
+    if(!allDepts.length){
+      deptTags.innerHTML='<div style="font-size:11px;color:var(--text3);padding:8px 0;">No departments added yet. Type below or import a file.</div>';
+    } else {
+      deptTags.innerHTML=allDepts.map((d,i)=>{
+        const active=activeDepts.includes(d);
+        return `<div class="tag" style="cursor:default;position:relative;padding-right:52px;">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;" title="${active?'Active — visible to field agents':'Inactive — not assigned yet'}">
+            <input type="checkbox" class="dept-active-cb" data-dept="${d.replace(/"/g,'&quot;')}"
+              ${active?'checked':''}
+              style="accent-color:var(--acc4);width:13px;height:13px;"
+              onchange="ldToggleDeptActivation('${selectedProjId}')">
+            <span style="font-weight:${active?'800':'400'};color:${active?'var(--acc4)':'var(--text2)'};">${d.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>
+            ${active?'<span style="font-size:8px;background:rgba(0,153,107,.15);color:var(--acc4);padding:1px 5px;border-radius:4px;font-weight:700;">ACTIVE</span>':''}
+          </label>
+          <button class="tag-x" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);" onclick="ldRemoveDept('${selectedProjId}', ${i})">✕</button>
+        </div>`;
+      }).join('');
+    }
   }
 }
 
@@ -5430,6 +5477,81 @@ function ldRemoveLoc(projId, idx){
   p.locations=p.locations.filter((_,i)=>i!==idx);
   p.active_locations=(p.active_locations||[]).filter(l=>l!==loc);
   renderLocsDepts();
+}
+
+// ── Departments (per-project) — exact mirror of the Locations functions above ──
+function ldToggleDeptActivation(projId){
+  const p=allProjects.find(p=>p.id===projId);if(!p)return;
+  const checked=[...document.querySelectorAll('.dept-active-cb:checked')].map(cb=>cb.dataset.dept);
+  p.active_departments=checked;
+  renderLocsDepts();
+}
+
+function ldSelectAllDepts(){
+  document.querySelectorAll('.dept-active-cb').forEach(cb=>{cb.checked=true;});
+  const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
+  if(projId) ldToggleDeptActivation(projId);
+}
+
+function ldClearAllDepts(){
+  document.querySelectorAll('.dept-active-cb').forEach(cb=>{cb.checked=false;});
+  const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
+  if(projId) ldToggleDeptActivation(projId);
+}
+
+function ldRemoveDept(projId, idx){
+  const p=allProjects.find(p=>p.id===projId);if(!p)return;
+  if(!Array.isArray(p.departments))return;
+  const dept=p.departments[idx];
+  if(dept===undefined)return;
+  p.departments=p.departments.filter((_,i)=>i!==idx);
+  p.active_departments=(p.active_departments||[]).filter(d=>d!==dept);
+  markLocsDeptsUnsaved();
+  renderLocsDepts();
+}
+
+async function ldImportDepts(input){
+  const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
+  if(!projId){toast('Select a project first','err');input.value='';return;}
+  const p=allProjects.find(p=>p.id===projId);if(!p){input.value='';return;}
+  const file=input.files[0];if(!file){return;}
+  const ext=file.name.split('.').pop().toLowerCase();
+  let depts=[];
+  if(ext==='csv'||ext==='txt'){
+    const text=await file.text();
+    depts=text.split(/\r?\n/).filter(l=>l.trim().length).flatMap(_parseCsvLine);
+    if(depts[0]&&/department|cost.?cent/i.test(depts[0]))depts=depts.slice(1);
+  } else {
+    const buf=await file.arrayBuffer();
+    const XLSX=await loadSheetJS();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:''}).filter(r=>r[0]);
+    depts=rows.map(r=>String(r[0]).trim()).filter(Boolean);
+    if(depts[0]&&/department|cost.?cent/i.test(depts[0]))depts=depts.slice(1);
+  }
+  if(!p.departments)p.departments=[];
+  let added=0, skipped=0;
+  depts.forEach(d=>{
+    if(!d){skipped++;return;}
+    if(p.departments.includes(d)){skipped++;return;}
+    p.departments.push(d);
+    if(!DEPARTMENTS.includes(d)) DEPARTMENTS.push(d);
+    added++;
+  });
+  input.value='';
+  toast(`${added} department${added!==1?'s':''} imported · ${skipped} skipped — click "Save" below to make this live`,'ok');
+  markLocsDeptsUnsaved();
+  renderLocsDepts();
+}
+
+function ldDownloadDeptTemplate(){
+  const csv='Department / Cost Centre\nOperations\nFinance\nIT\nWarehouse\n';
+  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
+  document.body.appendChild(a);a.href=url;a.download='Departments_Template.csv';a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},300);
+  toast('Template downloaded','ok');
 }
 
 // Proper quote-aware CSV field parser (handles commas inside quoted
@@ -5517,7 +5639,23 @@ function addLoc(){
   markLocsDeptsUnsaved();
   renderLocsDepts();
 }
-function addDept(){const v=document.getElementById('dept-inp').value.trim();if(!v)return;if(DEPARTMENTS.includes(v)){toast('Already exists','err');return;}DEPARTMENTS.push(v);document.getElementById('dept-inp').value='';markLocsDeptsUnsaved();renderLocsDepts();}
+function addDept(){
+  const v=document.getElementById('dept-inp').value.trim();
+  if(!v)return;
+  const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
+  if(!projId){toast('Select a project first','err');return;}
+  const p=allProjects.find(pr=>pr.id===projId);
+  if(!p){toast('Select a project first','err');return;}
+  if(!p.departments)p.departments=[];
+  if(p.departments.includes(v)){toast('Already exists in this project','err');return;}
+  p.departments.push(v);
+  if(!p.active_departments)p.active_departments=[];
+  if(!p.active_departments.includes(v))p.active_departments.push(v);
+  if(!DEPARTMENTS.includes(v)) DEPARTMENTS.push(v);
+  document.getElementById('dept-inp').value='';
+  markLocsDeptsUnsaved();
+  renderLocsDepts();
+}
 function removeLoc(l){
   LOCATIONS=LOCATIONS.filter(x=>x!==l);
   allProjects.forEach(p=>{
@@ -5527,7 +5665,16 @@ function removeLoc(l){
   markLocsDeptsUnsaved();
   renderLocsDepts();
 }
-function removeDept(idx){DEPARTMENTS=DEPARTMENTS.filter((_,i)=>i!==idx);markLocsDeptsUnsaved();renderLocsDepts();}
+function removeDept(idx){
+  const d=DEPARTMENTS[idx];
+  DEPARTMENTS=DEPARTMENTS.filter((_,i)=>i!==idx);
+  allProjects.forEach(p=>{
+    if(p.departments) p.departments=p.departments.filter(x=>x!==d);
+    if(p.active_departments) p.active_departments=p.active_departments.filter(x=>x!==d);
+  });
+  markLocsDeptsUnsaved();
+  renderLocsDepts();
+}
 
 let _locsDeptsUnsaved=false;
 function markLocsDeptsUnsaved(){
@@ -5548,7 +5695,11 @@ async function saveAllLocsDepts(){
     const projId=(document.getElementById('ld-proj-filter')||{}).value||'';
     const p=allProjects.find(pr=>pr.id===projId);
     if(p){
-      await sb.update('projects',p.id,{locations:p.locations||[],active_locations:p.active_locations||[],updated_at:new Date().toISOString()});
+      await sb.update('projects',p.id,{
+        locations:p.locations||[], active_locations:p.active_locations||[],
+        departments:p.departments||[], active_departments:p.active_departments||[],
+        updated_at:new Date().toISOString()
+      });
     }
     _locsDeptsUnsaved=false;
     const badge=document.getElementById('ld-unsaved-badge');
