@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Count Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#f5f6f2;--fg:#1c2421;--mu:#5d6763;--cd:#fff;--ln:#d6dad4;--ac:#0d6b5b;--af:#fff;--wa:#a4550a;--er:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#141a18;--fg:#e8ece9;--mu:#9aa5a0;--cd:#1e2624;--ln:#33403c;--ac:#3fbfa6;--af:#0b1512;--wa:#e2a25a;--er:#f08a82}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+.w{max-width:1100px;margin:auto;padding:12px}h1{font-size:18px;margin:0}
+input,select{padding:8px;font:inherit;color:var(--fg);background:var(--cd);border:1px solid var(--ln);border-radius:6px;max-width:100%}
+button{padding:8px 12px;font:inherit;color:var(--fg);background:var(--cd);border:1px solid var(--ln);border-radius:6px;cursor:pointer;margin:2px}
+button.p,button.on{background:var(--ac);color:var(--af);border-color:var(--ac)}
+.card{background:var(--cd);border:1px solid var(--ln);border-radius:8px;padding:12px;margin:10px 0}
+.t{overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{padding:5px 8px;border-bottom:1px solid var(--ln);text-align:left;white-space:nowrap}
+.bar{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}.mu{color:var(--mu)}#m{color:var(--wa);min-height:1.4em}
+label{display:inline-block;margin:4px 8px 4px 0;font-size:13px;color:var(--mu)}label input,label select{display:block}
+</style></head><body><div class="w"><div id="app"></div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+const CFG={url:'https://lrxhzepkmmuczcsiwzio.supabase.co',key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyeGh6ZXBrbW11Y3pjc2l3emlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODE2MTAsImV4cCI6MjEwNjQ1NzYxMH0.X53BRD7I7H45ov_-yRlU9vWp4ZwLHyeqfuCYZbo8ciI'};
+const sb=supabase.createClient(CFG.url,CFG.key),$=q=>document.querySelector(q),
+h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
+msg=t=>{const e=$('#m');if(e)e.textContent=t||''};
+let S={u:null,orgs:[],org:null,roles:[],engs:[],eng:null,tab:'eng',lines:[],team:[]};
+const ROLES=['counter','team_lead','reconciler','manager','admin','viewer','field_operator'];
+const TABS=[['eng','Engagements',['admin','manager']],['imp','Import',['admin','manager']],['team','Team',['admin']],['asg','Assignments',['admin','manager','team_lead']],['rec','Reconcile',['admin','manager','reconciler']],['rep','Reports',['admin','manager','reconciler']]];
+const can=t=>{const x=TABS.find(a=>a[0]==t);return !!x&&x[2].some(r=>S.roles.includes(r))},myTabs=()=>TABS.filter(t=>can(t[0]));
+const RINFO={counter:'Counts the locations assigned to them on the Field app. Blind: never sees system quantities. No access to this console.',team_lead:'Counts like a counter and stays blind to system quantities. In this console can share out locations, create recounts and sign off submitted locations (Assignments).',reconciler:'Reviews variances, approves final quantities and proposed new items, and runs reports. Sees system quantities. Does not count.',manager:'Runs counts: engagements, imports, assignments, reconciliation and reports. Cannot create accounts or change roles.',admin:'Full control, including accounts, roles and suspending people.',viewer:'Read-only: can see the final report of a closed count.',field_operator:'Role from the main inventory app. Has no permissions in the count console or the Field app.'};
+const rinfo=r=>RINFO[r]||'';
+const PRESETS=[['','None (set everything by hand)'],['apmt','Spare-parts reference count (7-column report)'],['okota','Water & pumps discovery count (item fields)']];
+const PHINT={'':'','apmt':'Sets the type to Reference count and adds the standard 7-column count report: Global Part No., OEM Part No., Description, Picking Location, Count Quantity, Notes, Counter.','okota':'Sets the type to Discovery and adds item fields for water equipment: brand, model, size, HP, phase, material, diameter. Counters can add items that are not on the list.'};
+function presetHint(){const v=$('#ps').value;if(v=='apmt')$('#ty').value='reference';if(v=='okota')$('#ty').value='discovery';$('#ph').textContent=PHINT[v]||''}
+function showRole(v){const e=$('#ri');if(e)e.textContent=v?v+': '+rinfo(v):''}
+async function all(q,pg=1000){let o=[];for(let f=0;;f+=pg){const r=await q().range(f,f+pg-1);if(r.error)throw r.error;o=o.concat(r.data);if(r.data.length<pg)return o}}
+const chunk=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));return o};
+function csvParse(t){const r=[];let a=[],c='',q=0;for(let i=0;i<t.length;i++){const x=t[i];if(q){if(x=='"'){if(t[i+1]=='"'){c+='"';i++}else q=0}else c+=x}else if(x=='"')q=1;else if(x==','){a.push(c);c=''}else if(x=='\n'||x=='\r'){if(x=='\r'&&t[i+1]=='\n')i++;a.push(c);c='';if(a.some(v=>v.trim()))r.push(a);a=[]}else c+=x}a.push(c);if(a.some(v=>v.trim()))r.push(a);return r}
+function dl(name,cols,rows,fmt){const a=[cols.map(c=>c[1]),...rows.map(r=>cols.map(c=>r[c[0]]??''))];let b;
+ if(fmt=='csv')b=new Blob(['\ufeff'+a.map(x=>x.map(v=>{v=String(v);return/[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v}).join(',')).join('\r\n')],{type:'text/csv'});
+ else{const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(a),'Report');b=new Blob([XLSX.write(wb,{type:'array',bookType:'xlsx'})])}
+ const l=document.createElement('a');l.href=URL.createObjectURL(b);l.download=name+'_'+new Date().toISOString().slice(0,10)+'.'+fmt;l.click()}
+const tbl=(c,r)=>`<div class=t><table><tr>${c.map(x=>`<th>${h(x[1])}`).join('')}${r.map(o=>`<tr>${c.map(x=>`<td>${x[0]=='act'||x[0]=='rsel'?o[x[0]]:h(o[x[0]])}`).join('')}`).join('')}</table></div>`;
+const opts=(l,v)=>l.map(x=>`<option value="${h(x[0])}"${x[0]==v?' selected':''}>${h(x[1])}`).join('');
+
+async function boot(){const{data}=await sb.auth.getSession();if(data.session){S.u=data.session.user;await loadOrgs()}else draw()}
+async function loadOrgs(){
+ const m=await sb.from('organization_members').select('organization_id').eq('user_id',S.u.id).eq('status','active');
+ const ids=(m.data||[]).map(x=>x.organization_id);
+ S.orgs=ids.length?(await sb.from('organizations').select('id,name').in('id',ids).order('name')).data||[]:[];
+ await pickOrg(S.orgs[0]&&S.orgs[0].id)}
+async function pickOrg(id){S.org=id;S.eng=null;S.roles=[];if(id){
+ const ur=await sb.from('user_roles').select('role_id').eq('user_id',S.u.id).eq('organization_id',id),ar=await sb.from('app_roles').select('id,code');
+ S.roles=(ur.data||[]).map(x=>(ar.data.find(a=>a.id==x.role_id)||{}).code);await loadEngs()}draw()}
+async function loadEngs(){S.engs=(await sb.from('count_engagements').select('*').eq('organization_id',S.org).order('created_at',{ascending:false})).data||[];if(!S.eng||!S.engs.find(e=>e.id==S.eng))S.eng=S.engs[0]&&S.engs[0].id}
+async function loadTeam(){
+ const ar=await sb.from('app_roles').select('id,code');S.ar=ar.data||[];
+ const t=await sb.rpc('count_team_list',{p_org:S.org});
+ if(!t.error&&t.data){S.team=t.data.map(x=>({id:x.user_id,email:x.email||'',status:x.status,name:x.display_name||x.email||x.user_id.slice(0,8),roles:x.roles||[]}));return}
+ const[m,p,ur]=await Promise.all([sb.from('organization_members').select('user_id,status').eq('organization_id',S.org),sb.from('profiles').select('user_id,display_name').eq('organization_id',S.org),sb.from('user_roles').select('user_id,role_id').eq('organization_id',S.org)]);
+ S.team=(m.data||[]).map(x=>({id:x.user_id,email:'',status:x.status,name:((p.data||[]).find(q=>q.user_id==x.user_id)||{}).display_name||x.user_id.slice(0,8),roles:(ur.data||[]).filter(r=>r.user_id==x.user_id).map(r=>(S.ar.find(a=>a.id==r.role_id)||{}).code)}))}
+
+function draw(){const a=$('#app'),so="sb.auth.signOut().then(()=>{S.u=null;draw()})";
+ if(!S.u){a.innerHTML='<div class=card><h1>Count Admin</h1><p><label>Email<input id=em type=email></label><label>Password<input id=pw type=password></label><button class=p onclick="login()">Sign in</button></p><div id=m></div></div>';return}
+ if(!S.org){a.innerHTML=`<div class=card><h1>Count Admin</h1><p>You are not a member of any organisation yet.</p><button onclick="${so}">Sign out</button></div>`;return}
+ const mt=myTabs(),os=S.orgs.length>1?`<label>Organisation<select onchange="pickOrg(this.value)">${opts(S.orgs.map(o=>[o.id,o.name]),S.org)}</select></label> `:'';
+ if(!mt.length){a.innerHTML=`<div class=card><h1>Count Admin</h1><p><b>Access denied.</b> This console is for administrators, managers, team leads and reconcilers.</p><p>Your role here: <b>${h(S.roles.filter(Boolean).join(', ')||'none')}</b>.</p><p class=mu>Counters count on the Field app. Ask an administrator if you need a different role.</p><p>${os}<button onclick="${so}">Sign out</button></p></div>`;return}
+ if(!can(S.tab))S.tab=mt[0][0];
+ a.innerHTML=`<div class=bar><h1>Count Admin</h1><span>${os}<label>Engagement<select onchange="S.eng=this.value;go(S.tab)">${opts(S.engs.map(e=>[e.id,e.name+' ('+e.status+')']),S.eng)}</select></label> <button onclick="${so}">Sign out</button></span></div>
+ <div>${mt.map(t=>`<button data-t="${t[0]}" class="${t[0]==S.tab?'on':''}" onclick="go('${t[0]}')">${t[1]}</button>`).join('')}</div><div id=m></div><div id=v></div>`;
+ go(S.tab)}
+async function login(){const r=await sb.auth.signInWithPassword({email:$('#em').value.trim(),password:$('#pw').value});if(r.error)return msg(r.error.message);S.u=r.data.user;await loadOrgs()}
+async function go(t){if(!can(t))return msg('You do not have access to this section.');S.tab=t;draw2();msg('');try{await V[t]()}catch(e){msg(e.message||String(e))}}
+function draw2(){document.querySelectorAll('[data-t]').forEach(b=>b.classList.toggle('on',b.dataset.t==S.tab))}
+const E=()=>S.engs.find(e=>e.id==S.eng);
+const V={
+async eng(){$('#v').innerHTML=`<div class=card>${tbl([['name','Name'],['type','Type'],['status','Status'],['blind','Blind'],['recount_rule','Recount rule'],['posts_to_ledger','Posts to stock'],['act','']],S.engs.map(e=>({...e,blind:e.blind?'yes':'no',posts_to_ledger:e.posts_to_ledger?'yes':'no',act:['draft','closed'].includes(e.status)?`<button onclick="setSt('${e.id}','active')">Activate</button>`:`<button onclick="setSt('${e.id}','closed')">Close</button>`})))}</div>
+ <div class=card><b>New engagement</b><br><label>Name<input id=n></label><label>Type<select id=ty>${opts([['reference','Reference count (against a list)'],['discovery','Discovery / digitisation'],['wall_to_wall','Wall to wall'],['cycle','Cycle count']])}</select></label><label>Preset<select id=ps onchange="presetHint()">${opts(PRESETS)}</select></label>
+ <label>Recount rule<select id=rr>${opts([['any_variance','Any variance'],['pct','Over % of system qty'],['abs','Over quantity']])}</select></label><label>Threshold<input id=rt type=number value=0 style="width:80px"></label>
+ <label><input id=bl type=checkbox checked style="display:inline"> Blind</label> <label><input id=pl type=checkbox style="display:inline"> Posts to this app's stock (use when this app is the client's stock record)</label><div id=ph class=mu></div><button class=p onclick="newEng()">Create</button></div>`},
+async imp(){if(!S.engs.length)return $('#v').innerHTML='<div class=card>Create an engagement first (Engagements tab). Items are shared by the whole organisation, but system quantities are saved against one engagement.</div>';
+ $('#v').innerHTML=`<div class=card><b>Import items and system quantities</b><br><label>Import into engagement<select id=ie onchange="S.eng=this.value;draw()">${opts(S.engs.map(e=>[e.id,e.name+' ('+e.status+', '+e.type+')']),S.eng)}</select></label><p class=mu>Items, categories, units and locations are saved for the whole organisation (existing items are updated by SKU). System quantities are saved only against the engagement chosen above.<br>CSV columns (any order): sku (or Global Part No.), description, oem (manufacturer part no.), category, uom, location, system_qty. Location and system_qty are optional (discovery counts need only the item list).</p><input id=f type=file accept=.csv><button class=p onclick="doImp()">Import</button><div id=pr class=mu></div></div>`},
+async team(){await loadTeam();$('#v').innerHTML=`<div class=card>${tbl([['name','Name'],['email','Email'],['rsel','Role'],['status','Status'],['act','']],S.team.map(m=>({...m,rsel:m.id==S.u.id?h(m.roles.join(', ')):`<select id="r_${m.id}" onchange="showRole(this.value)" onfocus="showRole(this.value)">${opts(ROLES.map(r=>[r,r]),m.roles[0])}</select><button onclick="setRole('${m.id}')">Change</button>${m.roles.length>1?' <span class=mu>('+h(m.roles.join(', '))+')</span>':''}`,act:m.id==S.u.id?'':`<button onclick="acct('${m.status=='active'?'suspend':'reinstate'}','${m.id}')">${m.status=='active'?'Suspend':'Reinstate'}</button>`})))}<div id=ri class=mu></div></div>
+ <div class=card><b>Create an account</b><br><label>Email or username-style address<input id=ue></label><label>Name<input id=un></label><label>Role<select id=ur onchange="$('#ri2').textContent=rinfo(this.value)">${opts(ROLES.map(r=>[r,r]))}</select></label><label>Temporary password<input id=up></label><button class=p onclick="mkUser()">Create</button><div id=ri2 class=mu>${h(rinfo(ROLES[0]))}</div><p class=mu>The person must change the password at first sign-in. For blind counting give counters ONLY the counter (or team_lead) role.</p></div>`},
+async asg(){if(!E())return $('#v').innerHTML='<div class=card>Create an engagement first.</div>';await loadTeam();
+ const[as,ls]=await Promise.all([sb.from('count_assignments').select('id,location_id,round,assigned_to,status').eq('engagement_id',S.eng).order('created_at'),sb.from('locations').select('id,code').eq('organization_id',S.org).order('code')]);
+ S.locs=ls.data||[];S.asg=as.data||[];const cn=S.team.filter(m=>m.status=='active'&&(m.roles.includes('counter')||m.roles.includes('team_lead')));
+ $('#v').innerHTML=`<div class=card><b>Create assignments</b> for <b>${h(E().name)}</b><br><label>Round<select id=rd>${opts([[1,'1 first count'],[2,'2 recount'],[3,'3 adjudication']])}</select></label>
+ <label>Share out<select id=sm>${opts([['blocks','In blocks (first group to the first counter, and so on)'],['turn','In turn (one location each, round and round)']])}</select></label>
+ <div><span class=mu>Counters</span><br>${cn.map(m=>`<label><input type=checkbox class=cn value="${m.id}" style="display:inline"> ${h(m.name)} <span class=mu>${h(m.email)}</span></label>`).join('')||'<span class=mu>No counters yet. Create accounts under Team.</span>'}</div>
+ <div><span class=mu>Locations</span> <button onclick="tickLoc(1)">Tick all</button><button onclick="tickLoc(0)">Clear</button><button onclick="tickBase()">Only this engagement's list</button><br>${S.locs.map(l=>`<label><input type=checkbox class=lc value="${l.id}" style="display:inline"> ${h(l.code)}</label>`).join('')||'<span class=mu>No locations yet. Import a list with locations.</span>'}</div><button class=p onclick="mkAsg()">Create</button></div>
+ <div class=card>${tbl([['loc','Location'],['round','Round'],['who','Counter'],['status','Status'],['act','']],S.asg.map(a=>({loc:(S.locs.find(l=>l.id==a.location_id)||{}).code,round:a.round,who:(S.team.find(m=>m.id==a.assigned_to)||{}).name,status:a.status,act:a.status=='submitted'?`<button onclick="sign('${a.id}')">Sign off</button>`:''})))}</div>`},
+async rec(){if(!E())return $('#v').innerHTML='<div class=card>Create an engagement first.</div>';await lines();await loadTeam();
+ const cn=S.team.filter(m=>m.status=='active'&&(m.roles.includes('counter')||m.roles.includes('team_lead'))),pi=(await sb.from('count_proposed_items').select('id,sku,description,category_name').eq('engagement_id',S.eng).eq('status','pending')).data||[];
+ const st=$('#sf')?$('#sf').value:'';const c={};S.lines.forEach(l=>c[l.status]=(c[l.status]||0)+1);
+ $('#v').innerHTML=`<div class=card>${Object.entries(c).map(([k,v])=>k+': '+v).join(' · ')||'No lines yet'}<br><label>Show<select id=sf onchange="V.recT()">${opts([['','All'],...Object.keys(c).map(k=>[k,k])])}</select></label>
+ <label>Recount round<select id=rr2>${opts([[2,'2'],[3,'3']])}</select></label><label>Assign to<select id=ra>${opts(cn.map(m=>[m.id,m.name]))}</select></label><button onclick="recount()">Create recount assignments</button></div><div class=card id=lt></div>
+ ${pi.length?`<div class=card><b>Proposed new items</b>${tbl([['sku','SKU'],['description','Description'],['category_name','Category'],['act','']],pi.map(p=>({...p,act:`<button onclick="appr('${p.id}')">Add to item list</button>`})))}</div>`:''}`;V.recT()},
+recT(){const f=$('#sf')?$('#sf').value:'',r=S.lines.filter(l=>!f||l.status==f).slice(0,500);
+ $('#lt').innerHTML=tbl([['sku','SKU'],['description','Description'],['location','Location'],['system_qty','System'],['r1','C1'],['r2','C2'],['r3','C3'],['final_qty','Final'],['variance','Var'],['status','Status'],['act','']],r.map(l=>({...l,act:['Variance','Needs recount'].includes(l.status)?`<input id="q${l.item_id.slice(0,6)}${l.location_id.slice(0,6)}" type=number step=any value="${l.final_qty??''}" style="width:80px"><button onclick="appCase('${l.item_id}','${l.location_id}')">Approve</button>`:''})))+(S.lines.length>500?'<p class=mu>Showing the first 500. Use the filter.</p>':'')},
+async rep(){if(!E())return $('#v').innerHTML='<div class=card>Create an engagement first.</div>';
+ const R=[['final','Final / comprehensive count report'],['var','Count performance variance report'],['kpi','KPI summary'],['exc','Obsolescence, damage and exceptions']];
+ $('#v').innerHTML='<div class=card>'+R.map(r=>`<p><b>${r[1]}</b><br><button onclick="exp('${r[0]}','csv')">CSV</button><button onclick="exp('${r[0]}','xlsx')">Excel</button></p>`).join('')+'<p class=mu>Client-specific column names and layouts (report templates) are not in this version.</p></div>'}};
+
+async function setSt(id,s){const r=await sb.from('count_engagements').update({status:s}).eq('id',id);if(r.error)return msg(r.error.message);await loadEngs();draw()}
+async function newEng(){const n=$('#n').value.trim();if(!n)return msg('Enter a name.');
+ const r=await sb.from('count_engagements').insert({organization_id:S.org,name:n,type:$('#ty').value,blind:$('#bl').checked,recount_rule:$('#rr').value,recount_threshold:+$('#rt').value||0,posts_to_ledger:$('#pl').checked}).select().single();
+ if(r.error)return msg(r.error.message);if($('#ps').value){const p=await sb.rpc('count_apply_preset',{p_engagement:r.data.id,p_preset:$('#ps').value});if(p.error)return msg(p.error.message)}
+ S.eng=r.data.id;await loadEngs();draw();msg('Engagement created. Activate it when counting starts.')}
+async function doImp(){const f=$('#f').files[0];if(!f)return msg('Choose a CSV file.');if(!confirm('Import into engagement "'+(E()||{}).name+'"?\n\nSystem quantities will be saved against this engagement.'))return;const P=t=>$('#pr').textContent=t;
+ const[H,...Rw]=csvParse(await f.text()),k=H.map(x=>x.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'')),
+ g=(r,n)=>{const i=k.findIndex(x=>n.includes(x));return i<0?'':(r[i]||'').trim()},
+ D=Rw.map(r=>({sku:g(r,['sku','global_part_no','item_code','sku_part_no','part_no']),name:g(r,['description','name','item_description']),oem:g(r,['oem','oem_part_no','manufacturer_part_number']),cat:g(r,['category']),uom:g(r,['uom','unit']),loc:g(r,['location','location_code','picking_location']),q:g(r,['system_qty','qty','on_hand','quantity'])})).filter(d=>d.sku&&d.name);
+ if(!D.length)return msg('No usable rows. Each row needs a SKU and a description.');
+ try{const up=async(t,rows,oc,ign)=>{for(const c of chunk(rows,500)){const r=await sb.from(t).upsert(c,{onConflict:oc,ignoreDuplicates:ign});if(r.error)throw r.error}},O=S.org,u=a=>[...new Set(a.filter(Boolean))];
+ P('Saving categories, units and locations…');
+ await up('categories',u(D.map(d=>d.cat)).map(name=>({organization_id:O,name})),'organization_id,name',true);
+ await up('units_of_measure',u(D.map(d=>d.uom)).map(code=>({organization_id:O,code,name:code})),'organization_id,code',true);
+ await up('locations',u(D.map(d=>d.loc)).map(code=>({organization_id:O,code,name:code,location_type:'bay'})),'organization_id,code',true);
+ const cm=Object.fromEntries((await sb.from('categories').select('id,name').eq('organization_id',O)).data.map(x=>[x.name,x.id])),um=Object.fromEntries((await sb.from('units_of_measure').select('id,code').eq('organization_id',O)).data.map(x=>[x.code,x.id]));
+ P('Saving '+D.length+' items…');const seen={};D.forEach(d=>seen[d.sku]=d);
+ await up('inventory_items',Object.values(seen).map(d=>({organization_id:O,item_code:d.sku,name:d.name,description:d.name,manufacturer_part_number:d.oem||null,category_id:cm[d.cat]||null,unit_of_measure_id:um[d.uom]||null})),'organization_id,item_code',false);
+ const B=D.filter(d=>d.loc&&d.q!==''&&!isNaN(+d.q));let n=0;
+ if(B.length){P('Saving system quantities…');const im={};for(const c of chunk(u(B.map(d=>d.sku)),200)){(await sb.from('inventory_items').select('id,item_code').eq('organization_id',O).in('item_code',c)).data.forEach(x=>im[x.item_code]=x.id)}
+  const lm=Object.fromEntries((await sb.from('locations').select('id,code').eq('organization_id',O)).data.map(x=>[x.code,x.id])),bm={};
+  B.forEach(d=>bm[im[d.sku]+'|'+lm[d.loc]]={organization_id:O,engagement_id:S.eng,item_id:im[d.sku],location_id:lm[d.loc],system_qty:+d.q});
+  await up('count_baseline',Object.values(bm),'engagement_id,item_id,location_id',false);n=Object.keys(bm).length}
+ P('');msg('Imported '+Object.keys(seen).length+' items and '+n+' system quantities.')}catch(e){P('');msg('Import stopped: '+(e.message||e))}}
+async function setRole(id){const nr=$('#r_'+id).value,m=S.team.find(x=>x.id==id),rid=(S.ar.find(a=>a.code==nr)||{}).id;
+ if(!m||!rid)return msg('Unknown role.');if(m.roles.length==1&&m.roles[0]==nr)return msg('That is already their role.');
+ if(m.roles.includes('admin')&&nr!='admin'&&S.team.filter(x=>x.status=='active'&&x.roles.includes('admin')).length<2)return msg('You cannot remove the last administrator.');
+ if(!confirm('Change '+m.name+' from '+(m.roles.join(', ')||'no role')+' to '+nr+'?\\n\\n'+nr+': '+rinfo(nr)))return;
+ const i=await sb.from('user_roles').upsert({user_id:id,role_id:rid,organization_id:S.org},{onConflict:'user_id,role_id,organization_id',ignoreDuplicates:true});if(i.error)return msg(i.error.message);
+ const d=await sb.from('user_roles').delete().eq('user_id',id).eq('organization_id',S.org).neq('role_id',rid);if(d.error)return msg(d.error.message);
+ await go('team');msg(m.name+' is now '+nr+'. It applies the next time they open the app.')}
+async function acct(a,id){const r=await sb.functions.invoke('admin-create-user',{body:{action:a,organization_id:S.org,user_id:id}});if(r.error||r.data?.error)return msg(r.data?.error||r.error.message);go('team')}
+async function mkUser(){const b={action:'create',organization_id:S.org,email:$('#ue').value.trim(),display_name:$('#un').value.trim(),role:$('#ur').value,temp_password:$('#up').value};
+ if(!b.email||b.temp_password.length<8)return msg('Enter an email and a temporary password of 8+ characters.');
+ const r=await sb.functions.invoke('admin-create-user',{body:b});if(r.error||r.data?.error)return msg(r.data?.error||r.error.message);msg('Account created.');go('team')}
+function tickLoc(v){document.querySelectorAll('.lc').forEach(x=>x.checked=!!v)}
+async function tickBase(){try{const b=await all(()=>sb.from('count_baseline').select('location_id').eq('engagement_id',S.eng).order('id')),k=new Set(b.map(x=>x.location_id));document.querySelectorAll('.lc').forEach(x=>x.checked=k.has(x.value));if(!k.size)msg('This engagement has no imported location list.')}catch(e){msg(e.message||String(e))}}
+async function mkAsg(){const w=[...document.querySelectorAll('.cn:checked')].map(x=>x.value);if(!w.length)return msg('Tick at least one counter.');
+ const rd=+$('#rd').value,have=new Set((S.asg||[]).filter(a=>a.round==rd).map(a=>a.location_id)),T=[...document.querySelectorAll('.lc:checked')].map(x=>x.value);
+ if(!T.length)return msg('Tick at least one location.');const L=T.filter(l=>!have.has(l)),skip=T.length-L.length;
+ if(!L.length)return msg('All ticked locations already have a counter in this round.');
+ const bl=Math.ceil(L.length/w.length),rows=L.map((l,i)=>({organization_id:S.org,engagement_id:S.eng,location_id:l,round:rd,assigned_to:$('#sm').value=='turn'?w[i%w.length]:w[Math.floor(i/bl)]}));
+ for(const c of chunk(rows,500)){const r=await sb.from('count_assignments').upsert(c,{onConflict:'engagement_id,location_id,round,assigned_to',ignoreDuplicates:true});if(r.error)return msg(r.error.message)}
+ await go('asg');msg(rows.length+' assignments created'+(skip?' ('+skip+' skipped: already assigned in this round)':'')+'.')}
+async function sign(id){const r=await sb.rpc('signoff_count_assignment',{p_assignment:id});if(r.error)return msg(r.error.message);go('asg')}
+async function lines(){const r=await all(()=>sb.rpc('count_lines',{p_engagement:S.eng}).order('sku'));S.lines=r}
+async function appCase(i,l){const e=$('#q'+i.slice(0,6)+l.slice(0,6));const r=await sb.rpc('approve_case',{p_engagement:S.eng,p_item:i,p_location:l,p_final_qty:+e.value,p_note:null});if(r.error)return msg(r.error.message);msg('Approved.');go('rec')}
+async function recount(){const r=await sb.rpc('create_recount_assignments',{p_engagement:S.eng,p_round:+$('#rr2').value,p_assignee:$('#ra').value});if(r.error)return msg(r.error.message);msg(r.data+' recount assignment(s) created.')}
+async function appr(id){const r=await sb.rpc('approve_proposed_item',{p_proposed:id});if(r.error)return msg(r.error.message);go('rec')}
+async function exp(k,fmt){try{await lines();const L=S.lines,VC=[['sku','SKU'],['oem_part_no','OEM part no.'],['description','Description'],['location','Location'],['system_qty','System qty'],['r1','Count 1'],['r2','Recount'],['r3','Round 3'],['final_qty','Final count'],['variance','Variance'],['status','Status']];
+ if(k=='final')return dl('final_count',VC,L,fmt);if(k=='var')return dl('variance',VC,L.filter(l=>l.status!='Matched'),fmt);
+ if(k=='kpi'){const m=L.filter(l=>l.system_qty!=null&&l.final_qty!=null),ok=m.filter(l=>l.variance==0).length,c=await all(()=>sb.from('count_cases').select('status').eq('engagement_id',S.eng).order('id'));
+  return dl('kpi',[['m','Metric'],['v','Value']],[{m:'Lines counted',v:L.filter(l=>l.final_qty!=null).length},{m:'Lines compared with list',v:m.length},{m:'Count accuracy %',v:m.length?Math.round(ok/m.length*1000)/10:''},{m:'Cases open (variance lines)',v:L.filter(l=>l.status=='Variance'||l.status=='Needs recount').length},{m:'Cases approved',v:c.filter(x=>x.status=='closed').length}],fmt)}
+ const en=await all(()=>sb.from('count_entries').select('item_id,location_id,round,counted_qty,condition,flag,expiry_date,remarks,counted_at').eq('engagement_id',S.eng).or('condition.neq.Good,flag.neq.None,expiry_date.not.is.null').order('counted_at')),
+ im={};for(const c of chunk([...new Set(en.map(x=>x.item_id).filter(Boolean))],150))(await sb.from('inventory_items').select('id,item_code,name').in('id',c)).data.forEach(x=>im[x.id]=x);
+ const lm=Object.fromEntries((await sb.from('locations').select('id,code').eq('organization_id',S.org)).data.map(x=>[x.id,x.code]));
+ dl('exceptions',[['sku','SKU'],['d','Description'],['loc','Location'],['counted_qty','Qty'],['condition','Condition'],['flag','Flag'],['expiry_date','Expiry'],['remarks','Remarks']],en.map(x=>({...x,sku:(im[x.item_id]||{}).item_code,d:(im[x.item_id]||{}).name,loc:lm[x.location_id]})),fmt)}catch(e){msg(e.message||String(e))}}
+boot();
+</script></body></html>
