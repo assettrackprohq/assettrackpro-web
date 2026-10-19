@@ -1,23 +1,316 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AssetTrackPro</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #dbeeff; 
-           display: flex; flex-direction: column; align-items: center; 
-           justify-content: center; height: 100vh; margin: 0; }
-    h1 { color: #0077cc; }
-    a { display: block; margin: 10px; padding: 14px 32px; 
-        background: #0077cc; color: white; border-radius: 8px; 
-        text-decoration: none; font-weight: bold; }
-    a:hover { background: #005fa3; }
-  </style>
-</head>
-<body>
-  <h1>AssetTrackPro</h1>
-  <a href="/field-app">Field App</a>
-  <a href="/admin-app">Admin App</a>
-</body>
-</html>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Inventory Companion</title>
+<link rel="icon" type="image/png" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-180.png">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1A3460">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Libre+Baskerville:wght@700&display=swap" rel="stylesheet">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon.svg">
+<style>
+:root{--navy:#1A3460;--blue:#2E7DD1;--gold:#C9A84C;--bg:#F3F8FE;--fg:#14233F;--mu:#5A6C88;--cd:#fff;--ln:#D3E2F3;--ac:#2E7DD1;--af:#fff;--wa:#8A6A12;--er:#C0392B;--ok:#1E8E5A;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.4 "DM Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.w{max-width:640px;margin:auto;padding:10px}
+h1{font-size:19px;margin:0}
+label{display:block;font-size:13px;color:var(--mu);margin-top:8px}
+input,select{width:100%;margin-top:3px;padding:12px;font:inherit;color:var(--fg);background:#fff;border:1.5px solid var(--ln);border-radius:10px}
+input:focus,select:focus{border-color:var(--blue)}
+button{padding:12px 14px;font:inherit;font-weight:500;color:var(--navy);background:#fff;border:1.5px solid var(--ln);border-radius:10px;cursor:pointer;margin:4px 4px 4px 0}
+button.p{background:#2569B8;color:#fff;border-color:#2569B8;font-weight:700}
+button.r{display:block;width:100%;text-align:left;margin:4px 0;background:#F7FBFF}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:2px}
+.card{background:var(--cd);border:1px solid var(--ln);border-radius:14px;padding:14px;margin:10px 0;box-shadow:0 1px 3px rgba(26,52,96,.07)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.mu{color:var(--mu);font-size:14px}.bad{color:var(--er)}.ok{color:var(--ok)}.warn{color:var(--wa)}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#toast{min-height:1.3em;color:var(--wa);font-weight:500;font-size:15px;margin:4px 0}
+.row{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--ln);font-size:15px}
+em{font-size:12px;color:var(--wa);font-style:normal;border:1px solid var(--gold);background:#FBF5E3;border-radius:6px;padding:0 5px}
+.brand{display:flex;justify-content:space-between;align-items:center;gap:8px;background:linear-gradient(120deg,var(--navy),#24508f);color:#fff;border-radius:14px 14px 0 0;padding:12px 14px;margin-top:2px}
+.bk{display:flex;align-items:center;gap:10px}.lg{display:inline-flex;width:38px;height:38px}
+.bt{font:700 18px/1.1 "Libre Baskerville",Georgia,serif}.bs{font-size:12px;color:#E6D9A8;letter-spacing:.03em}
+.st{font-size:13px;color:#CFE2F7}
+.co{background:#fff;border:1px solid var(--ln);border-top:4px solid var(--gold);border-radius:0 0 14px 14px;padding:10px 14px;margin-bottom:6px}
+.co .cl{display:block;font-size:12px;color:var(--mu)}
+.co b{font:700 21px/1.2 "Libre Baskerville",Georgia,serif;color:var(--navy)}
+.sheet{background:#fff;border:1px solid var(--ln);border-left:6px solid var(--gold);border-radius:14px;padding:12px 14px;margin:8px 0}
+.sco{font:700 20px/1.2 "Libre Baskerville",Georgia,serif;color:var(--navy)}
+.sen{color:var(--blue);font-weight:700;margin-top:2px}
+.sloc{margin-top:6px;display:inline-block;background:var(--navy);color:#fff;border-radius:999px;padding:3px 12px;font-size:14px}
+.chip{display:inline-block;background:#EAF3FC;color:var(--navy);border-radius:999px;padding:1px 10px;font-size:13px;font-weight:500;margin-left:6px}
+.bt{font-size:16px}.ce{color:var(--blue);font-weight:700;margin-top:2px}
+.no{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:30px;border-radius:999px;background:var(--navy);color:#fff;font-weight:700;font-size:14px;margin-right:8px;padding:0 6px}
+</style></head><body><div class="w"><div id="app"></div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+// Public project address and public (anon) key. Safe to ship: the database's row-level security protects the data.
+const CFG = {
+  url: 'https://lrxhzepkmmuczcsiwzio.supabase.co',
+  key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyeGh6ZXBrbW11Y3pjc2l3emlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODE2MTAsImV4cCI6MjEwNjQ1NzYxMH0.X53BRD7I7H45ov_-yRlU9vWp4ZwLHyeqfuCYZbo8ciI'
+};
+const $ = q => document.querySelector(q);
+const h = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => crypto.randomUUID ? crypto.randomUUID() :
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c == 'x' ? r : (r & 3 | 8)).toString(16); });
+const sb = supabase.createClient(CFG.url, CFG.key, { auth: { storageKey: 'ic-field-auth', persistSession: true, autoRefreshToken: true } });
+
+// ---- local storage on the phone (IndexedDB): cached lists and the queue of counts waiting to sync ----
+const DB = new Promise((res, rej) => {
+  const r = indexedDB.open('field-app', 1);
+  r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('q', { keyPath: 'id' }); };
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+const tx = async (s, m, f) => { const d = await DB; return new Promise((res, rej) => {
+  const t = d.transaction(s, m), q = f(t.objectStore(s)); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
+const kvGet = k => tx('kv', 'readonly', o => o.get(k)), kvSet = (k, v) => tx('kv', 'readwrite', o => o.put(v, k));
+const qAll = () => tx('q', 'readonly', o => o.getAll()), qPut = v => tx('q', 'readwrite', o => o.put(v)), qDel = id => tx('q', 'readwrite', o => o.delete(id));
+
+// wildcard search: * = any characters, ? = one character; without them, "contains"
+const mt = (t, q) => { t = String(t || '').toLowerCase(); q = q.toLowerCase();
+  if (!/[*?]/.test(q)) return t.includes(q);
+  try { return new RegExp('^' + q.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$').test(t); } catch (e) { return false; } };
+
+let S = { view: 'login', user: null, home: null, engSel: null, cur: null, items: [], props: [], meta: { fields: [], cats: [], uoms: [] }, sel: null, hits: [], pending: 0 };
+let tt; const toast = t => { const e = $('#toast'); if (e) e.textContent = t; clearTimeout(tt); tt = setTimeout(() => { const x = $('#toast'); if (x) x.textContent = ''; }, 6000); };
+const online = () => navigator.onLine;
+const norm = x => ({ id: x.item_id, sku: x.sku, oem: x.oem_part_no, desc: x.description, cat: x.category, uom: x.uom, attrs: x.attributes || {} });
+const name = () => (S.user && (S.user.user_metadata?.display_name || S.user.email)) || '';
+
+// ---- sync: sends queued counts; safe to repeat because every count has its own id ----
+let syncing = false;
+async function sync(manual) {
+  if (syncing || !S.user) return;
+  if (!online()) { if (manual) toast('No connection. Counts are saved on this phone.'); return; }
+  syncing = true; let sent = 0, failed = 0;
+  try {
+    const q = (await qAll()).filter(x => x.uid === S.user.id && !x.done && !x.err).sort((a, b) => a.t - b.t);
+    const bad = new Set();
+    for (const p of q.filter(x => x.kind === 'p')) {
+      const r = await sb.from('count_proposed_items').upsert(p.row, { onConflict: 'id', ignoreDuplicates: true });
+      if (r.error) { if (r.status === 0 || /fetch|network/i.test(r.error.message)) throw r.error; p.err = r.error.message; bad.add(p.row.id); failed++; } else { p.done = 1; sent++; }
+      await qPut(p);
+    }
+    const es = q.filter(x => x.kind === 'e' && !bad.has(x.row.proposed_item_id));
+    for (let i = 0; i < es.length; i += 25) {
+      const b = es.slice(i, i + 25);
+      const r = await sb.from('count_entries').upsert(b.map(x => x.row), { onConflict: 'id', ignoreDuplicates: true });
+      if (!r.error) { for (const x of b) { x.done = 1; await qPut(x); } sent += b.length; continue; }
+      if (r.status === 0 || /fetch|network/i.test(r.error.message)) throw r.error;
+      for (const x of b) {                         // find which count was refused
+        const o = await sb.from('count_entries').upsert(x.row, { onConflict: 'id', ignoreDuplicates: true });
+        if (o.error) { if (o.status === 0) throw o.error; x.err = o.error.message; failed++; } else { x.done = 1; sent++; }
+        await qPut(x);
+      }
+    }
+    if (manual || failed) toast(failed ? failed + ' count(s) were refused. See the list below.' : sent ? sent + ' count(s) synced.' : 'Everything is up to date.');
+  } catch (e) { if (manual) toast('Sync interrupted. Counts are safe on this phone.'); }
+  syncing = false; paint();
+}
+async function paint() {
+  const all = (await qAll()).filter(x => S.user && x.uid === S.user.id);
+  S.pending = all.filter(x => !x.done).length;
+  const p = $('#pend'); if (p) p.textContent = S.pending ? S.pending + ' waiting to sync' : 'All synced';
+  const r = $('#recent');
+  if (r && S.cur) {
+    const mine = all.filter(x => x.aid === S.cur.id && x.kind === 'e').sort((a, b) => b.t - a.t);
+    r.innerHTML = mine.length ? '<div class=card><b>Counted here</b> <span class=mu>(' + mine.length + ')</span>' + mine.slice(0, 10).map(x =>
+      '<div class=row><span>' + (x.done ? '<span class=ok>✓</span>' : x.err ? '<span class=bad>⚠</span>' : '⏳') + ' ' + h(x.sku || '(new)') + ' · ' + h(x.desc) +
+      (x.err ? '<br><span class="bad mu">' + h(x.err) + '</span>' : '') + '</span><span>' + h(x.row.counted_qty) +
+      (!x.done ? ' <button data-act=del data-id="' + h(x.id) + '">Remove</button>' : '') + '</span></div>').join('') + '</div>' : '';
+  }
+}
+
+// ---- screens ----
+const LOGO = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"38\" height=\"38\" viewBox=\"0 0 1024 1024\"><rect width=\"1024\" height=\"1024\" rx=\"230\" fill=\"#FFFFFF\"/><rect x=\"216\" y=\"196\" width=\"48\" height=\"640\" rx=\"14\" fill=\"#1A3460\"/><rect x=\"760\" y=\"196\" width=\"48\" height=\"640\" rx=\"14\" fill=\"#1A3460\"/><rect x=\"300\" y=\"262\" width=\"120\" height=\"110\" rx=\"12\" fill=\"#2E7DD1\"/><rect x=\"440\" y=\"292\" width=\"100\" height=\"80\" rx=\"12\" fill=\"#8FBBEA\"/><rect x=\"560\" y=\"242\" width=\"140\" height=\"130\" rx=\"12\" fill=\"#5E9BE0\"/><rect x=\"216\" y=\"372\" width=\"592\" height=\"40\" rx=\"12\" fill=\"#1A3460\"/><rect x=\"300\" y=\"458\" width=\"80\" height=\"90\" rx=\"12\" fill=\"#5E9BE0\"/><rect x=\"400\" y=\"428\" width=\"160\" height=\"120\" rx=\"12\" fill=\"#2E7DD1\"/><rect x=\"580\" y=\"478\" width=\"120\" height=\"70\" rx=\"12\" fill=\"#8FBBEA\"/><rect x=\"216\" y=\"548\" width=\"592\" height=\"40\" rx=\"12\" fill=\"#1A3460\"/><rect x=\"300\" y=\"614\" width=\"160\" height=\"110\" rx=\"12\" fill=\"#8FBBEA\"/><rect x=\"480\" y=\"634\" width=\"100\" height=\"90\" rx=\"12\" fill=\"#5E9BE0\"/><rect x=\"216\" y=\"724\" width=\"592\" height=\"40\" rx=\"12\" fill=\"#1A3460\"/><circle cx=\"764\" cy=\"764\" r=\"178\" fill=\"#C9A84C\" stroke=\"#FFFFFF\" stroke-width=\"30\"/><path d=\"M684 768l56 56 104-124\" stroke=\"#1A3460\" stroke-width=\"40\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>";
+const TYPE = { reference: 'Reference Count', discovery: 'Discovery Count', wall_to_wall: 'Wall to wall', cycle: 'Cycle count' };
+const company = () => { const o = (S.home && S.home.o) || {}, a = S.cur ? S.cur.organization_id : (S.home && S.home.a[0] && S.home.a[0].organization_id); return o[a] || Object.values(o)[0] || ''; };
+const clientOf = E => (E && E.client_name) || company();
+const curEng = () => { if (!S.home) return null; const L = engList(), id = S.cur ? S.cur.engagement_id : (S.engSel && S.engSel !== 'all' ? S.engSel : (L.length === 1 ? L[0].e.id : null)); return id ? S.home.e.find(e => e.id == id) : null; };
+const hdr = () => '<div class=brand><div class=bk><span class=lg>' + LOGO + '</span><div><div class=bt>Inventory Companion</div><div class=bs>by Skyrit Technologies</div></div></div><span class=st>' + (online() ? '● online' : '○ offline') + '</span></div>' +
+  (S.user && S.home && (S.view !== 'eng') ? (() => { const E0 = curEng(); return '<div class=co><span class=cl>Client</span><b>' + h(E0 ? clientOf(E0) : 'All my counts') + '</b>' + (E0 ? '<div class=ce>' + h(E0.name) + ' · ' + h(TYPE[E0.type] || E0.type) + '</div>' : '') + '</div>'; })() : '') +
+  (S.user ? '<div class="top mu"><span>' + h(name()) + '</span><span id=pend></span></div>' : '') + '<div id=toast></div>';
+const vLogin = () => '<div class=card><b>Sign in to count</b><label>Email or username<input id=em type=email autocomplete=username></label><label>Password<input id=pw type=password autocomplete=current-password></label><button class=p data-act=login>Sign in</button><p class=mu>Accounts are created by your administrator.</p></div>';
+const vPw = () => '<div class=card><b>Choose a new password</b><p class=mu>You must set your own password before you start.</p><label>New password (8 or more characters)<input id=n1 type=password autocomplete=new-password></label><label>Repeat it<input id=n2 type=password autocomplete=new-password></label><button class=p data-act=setpw>Save password</button></div>';
+const actA = () => S.home.a.filter(x => { const E = S.home.e.find(e => e.id == x.engagement_id); return E && E.status === 'active'; });
+const engList = () => { const m = new Map(); actA().forEach(x => m.set(x.engagement_id, (m.get(x.engagement_id) || 0) + 1)); return [...m].map(([id, n]) => ({ e: S.home.e.find(e => e.id == id), n })); };
+function route(keep) {
+  const L = engList();
+  if (S.engSel && S.engSel !== 'all' && !L.find(x => x.e.id == S.engSel)) S.engSel = null;
+  if (L.length === 1) S.engSel = L[0].e.id;
+  if (L.length > 1 && !(keep && S.engSel)) S.engSel = null;
+  S.view = (L.length > 1 && !S.engSel) ? 'eng' : 'list'; render();
+}
+const nat = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { numeric: true, sensitivity: 'base' });
+function vEng() {
+  const L = engList();
+  return '<div class=top><b>Choose the count you are working on</b><span><button data-act=out>Sign out</button></span></div>' +
+    L.map(x => '<div class=card><div class=sco>' + h(clientOf(x.e)) + '</div><b style="font-size:18px">' + h(x.e.name) + '</b><span class=chip>' + h(TYPE[x.e.type] || x.e.type) + '</span><br><span class=mu>' + x.n + ' location' + (x.n == 1 ? '' : 's') + ' to count</span><br><button class=p data-act=pickeng data-id="' + h(x.e.id) + '">Open this count</button></div>').join('') +
+    '<button data-act=pickeng data-id=all>Show all my assignments together</button>';
+}
+function vList() {
+  const L = engList(), sel = S.engSel && S.engSel !== 'all' ? S.home.e.find(e => e.id == S.engSel) : null, codeOf = x => (S.home.l.find(l => l.id == x.location_id) || {}).code || '';
+  const a = actA().filter(x => !sel || x.engagement_id == sel.id).sort((x, y) => nat(codeOf(x), codeOf(y)) || x.round - y.round);
+  return '<div class=top><b>My locations' + (a.length ? ' (' + a.length + ')' : '') + '</b><span>' + (L.length > 1 ? '<button data-act=switch>Change count</button>' : '') + '<button data-act=sync>Sync now</button><button data-act=refresh>Refresh</button><button data-act=out>Sign out</button></span></div>' +
+    (a.length ? a.map((x, i) => { const Lc = S.home.l.find(l => l.id == x.location_id) || {}, E = S.home.e.find(e => e.id == x.engagement_id) || {};
+      return '<div class=card><span class=no>' + (i + 1) + '</span><b>' + h(Lc.code) + '</b>' + (Lc.name && Lc.name !== Lc.code ? ' ' + h(Lc.name) : '') + '<br><span class=mu>' + (sel ? '' : h(clientOf(E)) + ' · ' + h(E.name) + ' · ') + 'Round ' + x.round + ' · ' + h(x.status.replace('_', ' ')) +
+        '</span><br><button class=p data-act=open data-id="' + h(x.id) + '">Open</button></div>'; }).join('')
+      : '<div class=card>' + (S.home.a.length ? 'Your assignments are not open yet. Ask your team lead to start the count.' : 'No open assignments. Ask your team lead to assign you a location.') + '</div>');
+}
+const canProp = () => { const E = S.home.e.find(e => e.id == S.cur.engagement_id) || {}; return E.type === 'discovery' || E.type === 'wall_to_wall'; };
+function vCount() {
+  const a = S.cur, L = S.home.l.find(l => l.id == a.location_id) || {}, E = S.home.e.find(e => e.id == a.engagement_id) || {};
+  return '<div class=top><button data-act=back>← Back</button><span class=chip>' + h(TYPE[E.type] || E.type || '') + '</span></div><div class=sheet><div class=sco>' + h(clientOf(E) || '') + '</div><div class=sen>' + h(E.name) + '</div><div class=sloc>' + h(L.code) + (L.name ? ' · ' + h(L.name) : '') + ' · Round ' + a.round + '</div></div>' +
+    '<div class=card><label>Find an item<input id=q placeholder="SKU, part no. or description (* ? allowed)" autocomplete=off></label><div id=res></div></div>' +
+    (S.sel ? vSel() : '') + '<div id=recent></div>' +
+    '<div class=card>' + (canProp() ? '<button data-act=prop>Item not on the list? Add it</button>' : '<p class=mu>Not on the list? This is a ' + h(TYPE[E.type] || 'count') + ', so new items cannot be added here. Count nothing and tell your team lead.</p>') +
+    '<button class=p data-act=submit>Submit this location</button></div>';
+}
+function vSel() {
+  const i = S.sel, at = Object.entries(i.attrs || {}).filter(([, v]) => v).map(([k, v]) => k + ': ' + v).join(' · ');
+  return '<div class=card><b>' + h(i.sku || '(new item)') + '</b> ' + (i.isNew ? '<em>new</em>' : '') + '<br>' + h(i.desc) +
+    '<br><span class=mu>' + [i.oem && 'OEM ' + i.oem, i.cat, i.uom, at].filter(Boolean).map(h).join(' · ') + '</span>' +
+    '<div class=g><label>Quantity<input id=qty type=number inputmode=decimal min=0 step=any></label><label>Condition<select id=cond><option>Good<option>Damaged<option>Obsolete<option>Expired</select></label>' +
+    '<label>Flag<select id=flg><option>None<option>Unidentified<option>Wrongly located</select></label><label>Expiry<input id=exp type=date></label></div>' +
+    '<label>Remarks<input id=rm></label><button class=p data-act=add>Add count</button><button data-act=cancel>Cancel</button></div>';
+}
+function vProp() {
+  return '<div class=top><button data-act=back2>← Back</button><b>Add a new item</b></div><div class=card>' +
+    '<label>SKU / Part No. (leave blank if none)<input id=ps></label><label>Description (required)<input id=pd></label>' +
+    '<label>Category<input id=pc list=cl></label><datalist id=cl>' + S.meta.cats.map(c => '<option value="' + h(c) + '">').join('') + '</datalist>' +
+    '<label>Unit<input id=pu list=ul placeholder=pcs></label><datalist id=ul>' + S.meta.uoms.map(c => '<option value="' + h(c) + '">').join('') + '</datalist>' +
+    '<div id=pf></div><button class=p data-act=saveprop>Save and count it</button></div>';
+}
+function propFields() {
+  const c = ($('#pc') || {}).value || '', o = {}; document.querySelectorAll('#pf [data-k]').forEach(i => o[i.dataset.k] = i.value);
+  const vs = k => [...new Set([...S.items, ...S.props].map(i => (i.attrs || {})[k]).filter(Boolean))];
+  $('#pf').innerHTML = S.meta.fields.filter(f => !f.applies_to_categories?.length || f.applies_to_categories.some(x => x.toLowerCase() === c.trim().toLowerCase()))
+    .map(f => '<label>' + h(f.label) + '<input data-k="' + h(f.key) + '" type="' + (f.data_type === 'number' ? 'number' : f.data_type === 'date' ? 'date' : 'text') + '" list="d_' + h(f.key) + '" value="' + h(o[f.key] || '') + '"><datalist id="d_' + h(f.key) + '">' + vs(f.key).map(v => '<option value="' + h(v) + '">').join('') + '</datalist></label>').join('');
+}
+function render() {
+  $('#app').innerHTML = hdr() + ({ login: vLogin, pw: vPw, eng: S.home && vEng, list: S.home && vList, count: S.home && S.cur && vCount, prop: vProp }[S.view] || vLogin)();
+  if (S.view === 'count') paint(); else if (S.view === 'prop') propFields(); else if (S.user) paint();
+}
+
+// ---- actions ----
+async function loadHome() {
+  const key = 'home:' + S.user.id; let d = null;
+  if (online()) try {
+    const a = await sb.from('count_assignments').select('id,organization_id,engagement_id,location_id,round,status').in('status', ['assigned', 'in_progress']).order('created_at');
+    if (a.error) throw a.error;
+    const L = [...new Set(a.data.map(x => x.location_id))], E = [...new Set(a.data.map(x => x.engagement_id))];
+    const [l, e] = await Promise.all([L.length ? sb.from('locations').select('id,code,name').in('id', L) : { data: [] },
+                                      E.length ? sb.from('count_engagements').select('id,name,type,status,client_name').in('id', E) : { data: [] }]);
+    const o = await sb.from('organizations').select('id,name');
+    d = { a: a.data, l: l.data || [], e: e.data || [], o: Object.fromEntries((o.data || []).map(x => [x.id, x.name])) }; await kvSet(key, d);
+  } catch (e) { d = null; }
+  if (!d) { d = await kvGet(key); if (d) toast('Offline: showing your last downloaded list.'); }
+  S.home = d || { a: [], l: [], e: [] };
+}
+async function loadMeta(eid) {
+  const key = 'meta:' + eid; let m = null;
+  if (online()) try {
+    const [f, c, u] = await Promise.all([sb.from('count_field_defs').select('key,label,data_type,applies_to_categories').eq('engagement_id', eid).order('sort'),
+      sb.from('categories').select('name').order('name'), sb.from('units_of_measure').select('code').order('code')]);
+    m = { fields: f.data || [], cats: (c.data || []).map(x => x.name), uoms: (u.data || []).map(x => x.code) }; await kvSet(key, m);
+  } catch (e) { m = null; }
+  S.meta = m || (await kvGet(key)) || { fields: [], cats: [], uoms: [] };
+}
+async function openA(id) {
+  const a = S.home.a.find(x => x.id == id); if (!a) return;
+  let it = await kvGet('items:' + id);
+  if (online()) {
+    let all = [], err = null;
+    for (let f = 0; ; f += 1000) {                   // the server returns at most 1000 rows at a time
+      const r = await sb.rpc('get_my_assignment_items', { p_assignment: id }).order('sku').range(f, f + 999);
+      if (r.error) { err = r.error; break; }
+      all = all.concat(r.data); if (r.data.length < 1000) break;
+    }
+    if (!err) { it = all.map(norm); await kvSet('items:' + id, it); } else if (!it) return toast(err.message);
+  }
+  if (!it) return toast('Connect to the internet once to download this list.');
+  S.cur = a; S.items = it; S.sel = null; S.props = (await kvGet('props:' + id)) || [];
+  await loadMeta(a.engagement_id); S.view = 'count'; render();
+}
+async function afterLogin() {
+  if (S.user.user_metadata?.must_change_password) { S.view = 'pw'; render(); return; }
+  await loadHome(); S.engSel = null; route(); sync();
+}
+async function addCount() {
+  const i = S.sel, q = $('#qty').value, a = S.cur;
+  if (q === '' || isNaN(+q) || +q < 0) return toast('Enter a valid quantity.');
+  const row = { id: uid(), organization_id: a.organization_id, engagement_id: a.engagement_id, assignment_id: a.id, location_id: a.location_id, round: a.round,
+    counted_qty: +q, device_ts: new Date().toISOString(), condition: $('#cond').value, flag: $('#flg').value, expiry_date: $('#exp').value || null, remarks: $('#rm').value.trim() || null };
+  if (i.isNew) row.proposed_item_id = i.pid; else row.item_id = i.id;
+  await qPut({ id: row.id, kind: 'e', uid: S.user.id, aid: a.id, t: Date.now(), row, sku: i.sku, desc: i.desc, done: 0, err: '' });
+  S.sel = null; render(); toast('Added.'); sync();
+}
+async function saveProp() {
+  const d = $('#pd').value.trim(), a = S.cur;
+  if (!d) return toast('Enter a description.');
+  const attrs = {}; document.querySelectorAll('#pf [data-k]').forEach(i => { if (i.value) attrs[i.dataset.k] = i.value; });
+  const dup = [...S.items, ...S.props].find(i => (i.desc || '').toLowerCase() === d.toLowerCase() && JSON.stringify(i.attrs || {}) === JSON.stringify(attrs));
+  if (dup) return toast('Already on the list as ' + (dup.sku || 'a new item') + '. Search for it instead.');
+  const sku = $('#ps').value.trim(), cat = $('#pc').value.trim(), uom = $('#pu').value.trim(), pid = uid();
+  await qPut({ id: pid, kind: 'p', uid: S.user.id, aid: a.id, t: Date.now(), done: 0, err: '',
+    row: { id: pid, organization_id: a.organization_id, engagement_id: a.engagement_id, sku: sku || null, description: d, category_name: cat || null, uom_code: uom || null, attributes: attrs } });
+  const n = { pid, sku, desc: d, cat, uom, attrs, isNew: true };
+  S.props.push(n); await kvSet('props:' + a.id, S.props); S.sel = n; S.view = 'count'; render(); sync();
+}
+async function submit() {
+  const mine = (await qAll()).filter(x => x.uid === S.user.id && x.aid === S.cur.id);
+  if (mine.some(x => !x.done && x.err)) return toast('Some counts were refused. Remove or fix them first.');
+  if (mine.some(x => !x.done)) { await sync(true); if ((await qAll()).some(x => x.uid === S.user.id && x.aid === S.cur.id && !x.done)) return toast('Not all counts have synced yet. Try again with a connection.'); }
+  if (!online()) return toast('Connect to the internet to submit.');
+  if (!mine.some(x => x.kind === 'e') && !confirm('You have not counted anything here. Submit anyway?')) return;
+  if (!confirm('Submit this location? You cannot add counts afterwards.')) return;
+  const r = await sb.rpc('submit_count_assignment', { p_assignment: S.cur.id });
+  if (r.error) return toast(r.error.message);
+  S.cur = null; await loadHome(); route(true); toast('Submitted.');
+}
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return; const a = b.dataset.act;
+  if (a === 'login') {
+    const r = await sb.auth.signInWithPassword({ email: $('#em').value.trim(), password: $('#pw').value });
+    if (r.error) return toast(r.error.message); S.user = r.data.user; afterLogin();
+  } else if (a === 'setpw') {
+    const p = $('#n1').value; if (p.length < 8) return toast('Use at least 8 characters.'); if (p !== $('#n2').value) return toast('The two passwords differ.');
+    const r = await sb.auth.updateUser({ password: p, data: { must_change_password: false } }); if (r.error) return toast(r.error.message);
+    S.user = r.data.user; afterLogin();
+  } else if (a === 'out') {
+    await paint(); if (S.pending && !confirm(S.pending + ' count(s) have not synced and stay on this phone. Sign out anyway?')) return;
+    await sb.auth.signOut(); S = { ...S, user: null, home: null, engSel: null, cur: null, view: 'login' }; render();
+  } else if (a === 'sync') sync(true);
+  else if (a === 'refresh') { await loadHome(); route(true); }
+  else if (a === 'pickeng') { S.engSel = b.dataset.id; S.view = 'list'; render(); }
+  else if (a === 'switch') { S.engSel = null; S.view = 'eng'; render(); }
+  else if (a === 'open') openA(b.dataset.id);
+  else if (a === 'back') { S.cur = null; S.sel = null; route(true); }
+  else if (a === 'back2') { S.view = 'count'; render(); }
+  else if (a === 'pick') { S.sel = S.hits[+b.dataset.i]; render(); }
+  else if (a === 'cancel') { S.sel = null; render(); }
+  else if (a === 'add') addCount();
+  else if (a === 'prop') { S.view = 'prop'; render(); }
+  else if (a === 'saveprop') saveProp();
+  else if (a === 'submit') submit();
+  else if (a === 'del') { await qDel(b.dataset.id); paint(); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'q') {
+    const q = e.target.value.trim(), r = $('#res'); if (!q) { r.innerHTML = ''; return; }
+    S.hits = [...S.props, ...S.items].filter(i => mt(i.sku, q) || mt(i.oem, q) || mt(i.desc, q) || mt(Object.values(i.attrs || {}).join(' '), q)).slice(0, 12);
+    r.innerHTML = S.hits.map((i, n) => '<button class=r data-act=pick data-i=' + n + '>' + h(i.sku || '(new)') + ' · ' + h(i.desc) + (i.isNew ? ' <em>new</em>' : '') + '</button>').join('') ||
+      '<p class=mu>No match.</p>';
+  } else if (e.target.id === 'pc') propFields();
+});
+window.addEventListener('online', () => { sync(); const t = $('.st'); if (t) t.textContent = '● online'; });
+window.addEventListener('offline', () => { const t = $('.st'); if (t) t.textContent = '○ offline'; });
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+sb.auth.onAuthStateChange((ev, s) => { if (ev === 'SIGNED_OUT' && S.user) { S = { ...S, user: null, home: null, engSel: null, cur: null, view: 'login' }; render(); } });
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) { S.user = data.session.user; afterLogin(); } else render();
+})();
+</script></body></html>

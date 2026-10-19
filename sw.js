@@ -1,42 +1,18 @@
-// AssetTrackPro Field App — service worker
-// Minimal by design: this exists so PWABuilder/Bubblewrap recognizes the
-// site as a valid installable PWA. It does NOT change your app's existing
-// offline sync logic (localStorage queue + Supabase) — that stays as-is.
-
-const CACHE_NAME = "atp-field-shell-v1";
-const APP_SHELL = [
-  "/field-app"
-];
-
-// Cache the app shell on install so the wrapped app can boot even on a
-// flaky connection (the field-app's own offline queue handles data sync).
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
-  );
-  self.skipWaiting();
-});
-
-// Clean up old caches on activate.
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
-      )
-    )
-  );
-  self.clients.claim();
-});
-
-// Network-first for navigation requests (so you always get the latest
-// deployed version when online), falling back to the cached shell offline.
-self.addEventListener("fetch", (event) => {
-  if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match("/field-app"))
-    );
+// Caches the app shell so Inventory Companion opens without a connection. Data calls to Supabase are never cached.
+const C = 'inventory-companion-v3';
+const SHELL = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png', './icons/favicon-32.png'];
+self.addEventListener('install', e => e.waitUntil(caches.open(C).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())));
+self.addEventListener('activate', e => e.waitUntil(
+  caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x)))).then(() => self.clients.claim())));
+self.addEventListener('fetch', e => {
+  const r = e.request, u = new URL(r.url);
+  if (r.method !== 'GET' || u.hostname.endsWith('supabase.co')) return;
+  const keep = u.origin === location.origin || u.hostname === 'cdn.jsdelivr.net';
+  if (!keep) return;
+  const store = res => { if (res.ok) { const cp = res.clone(); caches.open(C).then(c => c.put(r, cp)); } return res; };
+  if (r.mode === 'navigate') {            // pages: network first, so updates arrive; cache when offline
+    e.respondWith(fetch(r).then(store).catch(() => caches.match('./index.html')));
+  } else {                                // assets and the supabase library: cache first
+    e.respondWith(caches.match(r).then(m => m || fetch(r).then(store)));
   }
-  // All other requests (API calls, Supabase, assets) pass through untouched —
-  // your app's existing localStorage/Supabase sync logic owns that behavior.
 });
