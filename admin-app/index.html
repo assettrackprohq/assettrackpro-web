@@ -2876,6 +2876,30 @@ async function switchWorkspace(companyId){
   } else {
     allAssets=getLocalAssets().filter(a=>!a.company_id||a.company_id===companyId);
   }
+  // Reload projects + assignments for the newly selected company. These were
+  // previously only loaded once at login (for whichever company was active
+  // then), so after switching workspace the in-memory list still held the
+  // ORIGINAL company's projects — and the Projects screen, which filters that
+  // list by the active company, showed nothing for the new one.
+  if(CONFIGURED){
+    try{
+      const [projs,assigns]=await Promise.all([
+        sb.query('projects',`?company_id=eq.${companyId}&select=*&order=created_at.desc`),
+        sb.query('project_assignments',`?company_id=eq.${companyId}&select=*`)
+      ]);
+      // Ignore the result if the person switched again while this was loading
+      if(activeCompanyId===companyId){
+        allProjects=Array.isArray(projs)?projs:[];
+        allAssignments=Array.isArray(assigns)?assigns:[];
+        // Visible in the browser console to help diagnose "why is this empty?"
+        console.info('[switchWorkspace] company',companyId,'→',allProjects.length,'project(s),',allAssignments.length,'assignment(s) loaded');
+      }
+    }catch(e){
+      if(activeCompanyId===companyId){ allProjects=[]; allAssignments=[]; }
+      logErr('switchWorkspace','project reload failed: '+e.message,'company='+companyId);
+      toast('Could not load projects for this company — check Error Log','err');
+    }
+  }
   // Update UI badge
   const badge=document.getElementById('active-co-badge');
   if(badge)badge.textContent=activeCompany?activeCompany.name:'—';
