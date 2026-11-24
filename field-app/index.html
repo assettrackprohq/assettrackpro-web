@@ -447,6 +447,42 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
 .modal-acts{display:flex;gap:10px;margin-top:20px;}
 .f3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
 @media(max-width:380px){.f3{grid-template-columns:1fr 1fr;}}
+/* Project Guide */
+.bnav.five .nb{padding:7px 7px;}
+.gd-sum{margin:14px 20px 0;background:var(--surf);border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;}
+.gd-big{font-family:var(--fh);font-size:30px;font-weight:900;color:var(--text);line-height:1.1;}
+.gd-big span{font-size:14px;font-weight:800;color:var(--text2);}
+.gd-bar{height:12px;background:var(--surf2);border-radius:8px;overflow:hidden;margin:10px 0 6px;}
+.gd-bar i{display:block;height:100%;background:var(--g-teal);border-radius:8px;transition:width .3s;}
+.gd-bar.sm{height:7px;margin:7px 0 4px;}
+.gd-sub{font-size:12px;color:var(--text2);font-weight:700;}
+.gd-link{background:none;border:none;color:var(--acc);font-weight:900;font-family:var(--fh);cursor:pointer;padding:0 0 0 6px;font-size:12px;}
+.gd-note{margin:10px 20px 0;padding:9px 12px;border-radius:10px;background:var(--surf2);color:var(--text2);font-size:11.5px;font-weight:700;}
+.gd-alert{margin:10px 20px 0;padding:11px 14px;border-radius:12px;background:rgba(224,136,0,.14);border:2px solid var(--acc2);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;}
+.gd-alert span{font-size:11px;font-weight:800;color:var(--text2);white-space:nowrap;}
+.gd-recent{margin:6px 20px 0;max-height:260px;overflow:auto;border:2px solid var(--border);border-radius:12px;background:var(--surf);}
+.gd-ri{padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text);}
+.gd-ri div{color:var(--text2);font-size:11px;margin-top:2px;}
+.gd-chips{display:flex;flex-wrap:wrap;gap:6px;padding:10px 20px 0;}
+.gd-chip{background:var(--acc);color:#fff;border:none;border-radius:20px;padding:6px 12px;font-family:var(--fh);font-weight:800;font-size:11.5px;cursor:pointer;}
+.gd-tabs{display:flex;gap:6px;padding:12px 20px 0;}
+.gd-tabs button{flex:1;padding:9px 4px;border-radius:10px;border:2px solid var(--border);background:var(--surf);color:var(--text2);font-family:var(--fh);font-weight:900;font-size:12px;cursor:pointer;}
+.gd-tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc);}
+.gd-tabs button:disabled{opacity:.4;}
+.gd-tools{display:flex;gap:8px;padding:10px 20px 0;align-items:center;}
+.gd-tools .fi{flex:1;padding:9px 12px;}
+.gd-tog{padding:9px 10px;border-radius:10px;border:2px solid var(--border);background:var(--surf);color:var(--text2);font-family:var(--fh);font-weight:800;font-size:11px;cursor:pointer;white-space:nowrap;}
+.gd-tog.on{background:var(--acc4);color:#fff;border-color:var(--acc4);}
+.gd-list{padding:10px 20px 24px;}
+.gd-item{background:var(--surf);border:2px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:8px;cursor:pointer;}
+.gd-item:active{background:var(--surf2);}
+.gd-item.done{opacity:.65;}
+.gd-it-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline;}
+.gd-it-name{font-weight:800;font-size:13px;color:var(--text);word-break:break-word;}
+.gd-it-n{font-family:var(--fh);font-weight:900;font-size:17px;color:var(--text);white-space:nowrap;}
+.gd-it-n span{font-size:12px;color:var(--text2);}
+.gd-it-sub{font-size:11px;color:var(--text2);font-weight:700;}
+.gd-item.done .gd-it-sub{color:var(--acc4);}
 </style>
 
 <!-- ── AUDITOR QR MODAL — styles ── -->
@@ -769,6 +805,12 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
       <div style="padding:0 20px 24px;" id="spool-list"></div>
     </div>
 
+    <!-- PROJECT GUIDE (FAR expected vs seen) -->
+    <div class="screen" id="s-guide">
+      <div class="shdr"><div class="shdr-ttl">Project Guide</div></div>
+      <div id="guide-body"></div>
+    </div>
+
   </div>
 
   <!-- Bottom Nav -->
@@ -781,6 +823,9 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
     </button>
     <button class="nb" id="nb-audit" onclick="go('audit')">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg><span>Audit</span>
+    </button>
+    <button class="nb" id="nb-guide" onclick="go('guide')" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg><span>Guide</span>
     </button>
     <button class="nb" id="nb-spool" onclick="go('spool')">
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg><span>Spool</span>
@@ -1582,6 +1627,7 @@ function goToApp(){
   }
   initApp();
   loadMyRangeWidget();
+  loadFieldGuide();
 }
 
 // Shows live progress for any label range(s) an admin has assigned
@@ -2019,6 +2065,81 @@ function onSubcat(){
 // ══════════════════════════════════════════════════════
 // NAVIGATION
 // ══════════════════════════════════════════════════════
+// ── Project Guide (FAR reconciliation, field view) ──
+/* ══ PROJECT GUIDE (FAR reconciliation, field view) ═══════════════════
+   Shows field officers what the client's FAR expects versus what has been seen,
+   per location / category / product, for the CURRENT project. The data is a
+   value-free summary published by an admin: it has no NBV, cost or serials. */
+let guideData=null;
+const GD={dim:'loc',f:{loc:null,cat:null,prod:null},q:'',rem:false,openRecent:false};
+const GD_IDX={loc:0,cat:1,prod:2}, GD_LBL={loc:'Location',cat:'Category',prod:'Product'}, GD_ORDER=['loc','cat','prod'];
+const GD_NOLOC='(location not on FAR)';
+function gdH(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function gdName(dim,v){return (dim==='loc'&&v===GD_NOLOC)?'Not yet located':v;}
+function gdRows(data,f){return (data&&data.rows||[]).filter(r=>(!f.loc||r[0]===f.loc)&&(!f.cat||r[1]===f.cat)&&(!f.prod||r[2]===f.prod));}
+function gdTotals(rows){let e=0,s=0;rows.forEach(r=>{e+=r[3];s+=r[4];});return {expected:e,seen:s,remaining:e-s,pct:e?Math.round(1000*s/e)/10:0};}
+function gdGroup(rows,dim,q,remOnly){
+  const m=new Map(),i=GD_IDX[dim],qq=String(q||'').trim().toLowerCase();
+  rows.forEach(r=>{const o=m.get(r[i])||m.set(r[i],{key:r[i],expected:0,seen:0}).get(r[i]);o.expected+=r[3];o.seen+=r[4];});
+  let list=[...m.values()].map(o=>({...o,remaining:o.expected-o.seen}));
+  if(qq)list=list.filter(o=>gdName(dim,o.key).toLowerCase().includes(qq));
+  if(remOnly)list=list.filter(o=>o.remaining>0);
+  return list.sort((a,b)=>b.remaining-a.remaining||String(a.key).localeCompare(String(b.key),'en',{numeric:true}));
+}
+function gdRecent(data,f){return (data&&data.recent||[]).filter(x=>(!f.loc||x.loc===f.loc)&&(!f.cat||x.cat===f.cat)&&(!f.prod||x.desc===f.prod));}
+function gdNextDim(cur,f){for(let k=1;k<=3;k++){const d=GD_ORDER[(GD_ORDER.indexOf(cur)+k)%3];if(!f[d])return d;}return cur;}
+
+function gdCacheKey(){return 'atp_guide_'+(currentProjectId||'');}
+async function loadFieldGuide(){
+  const nb=document.getElementById('nb-guide'),bar=document.querySelector('.bnav');
+  const show=on=>{if(nb)nb.style.display=on?'':'none';if(bar)bar.classList.toggle('five',!!on);};
+  guideData=null;show(false);
+  if(!currentProjectId||typeof CONFIGURED!=='undefined'&&CONFIGURED===false)return;
+  try{
+    const r=await sb.query('recon_field_guide',`?project_id=eq.${encodeURIComponent(currentProjectId)}&select=published_at,published_by,data`);
+    guideData=r&&r[0]?{...r[0].data,published_at:r[0].published_at}:null;
+    try{if(guideData)localStorage.setItem(gdCacheKey(),JSON.stringify(guideData));else localStorage.removeItem(gdCacheKey());}catch(e){}
+  }catch(e){
+    // offline or tables not installed: use the last copy this device saw (offline-first), else no tab
+    try{const c=localStorage.getItem(gdCacheKey());guideData=c?JSON.parse(c):null;}catch(_){guideData=null;}
+  }
+  show(!!guideData);
+}
+async function gdRefresh(){toast('Refreshing guide…');await loadFieldGuide();if(guideData){renderGuide();toast('Guide updated','ok');}else{go('home');toast('No guide published for this project');}}
+function gdSetDim(d){GD.dim=d;renderGuide();}
+function gdPick(i){const list=gdGroup(gdRows(guideData,GD.f),GD.dim,GD.q,GD.rem);const o=list[i];if(!o)return;if(GD.f[GD.dim])return;GD.f[GD.dim]=o.key;GD.dim=gdNextDim(GD.dim,GD.f);GD.q='';renderGuide();}
+function gdClear(d){GD.f[d]=null;GD.dim=d;GD.q='';renderGuide();}
+function gdSearch(v){GD.q=v;renderGuide(true);}
+function gdToggleRem(){GD.rem=!GD.rem;renderGuide();}
+function gdToggleRecent(){GD.openRecent=!GD.openRecent;renderGuide();}
+function renderGuide(keepFocus){
+  const el=document.getElementById('guide-body');if(!el)return;
+  if(!guideData){el.innerHTML='<div style="padding:30px 20px;text-align:center;color:var(--text2);font-weight:800;">No guide has been published for this project yet.</div>';return;}
+  const rows=gdRows(guideData,GD.f),T=gdTotals(rows),list=gdGroup(rows,GD.dim,GD.q,GD.rem),rec=gdRecent(guideData,GD.f);
+  const chips=GD_ORDER.filter(d=>GD.f[d]).map(d=>`<button class="gd-chip" onclick="gdClear('${d}')">${GD_LBL[d]}: ${gdH(gdName(d,GD.f[d]))} ✕</button>`).join('');
+  const asAt=guideData.published_at?new Date(guideData.published_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+  let h=`<div class="gd-sum"><div class="gd-big">${T.seen.toLocaleString()} <span>of ${T.expected.toLocaleString()} seen</span></div>
+      <div class="gd-bar"><i style="width:${Math.min(100,T.pct)}%"></i></div>
+      <div class="gd-sub">${T.pct}% · <b>${T.remaining.toLocaleString()} still to find</b> · updated ${gdH(asAt)} <button class="gd-link" onclick="gdRefresh()">↻ refresh</button></div></div>`;
+  if(guideData.far_has_location===false)h+=`<div class="gd-note">The client's register has no locations, so a location only shows where items were already found. Items not found yet appear under “Not yet located”.</div>`;
+  if(rec.length){
+    h+=`<div class="gd-alert" onclick="gdToggleRecent()"><b>🆕 ${rec.length} recently bought item${rec.length>1?'s':''} not seen yet</b><span>${GD.openRecent?'hide ▲':'show ▼'}</span></div>`;
+    if(GD.openRecent)h+=`<div class="gd-recent">`+rec.slice(0,60).map(x=>`<div class="gd-ri"><b>${gdH(x.desc)}</b><div>${gdH(x.code)} · ${gdH(gdName('loc',x.loc))} · bought ${gdH((x.acq||'').slice(0,7))}</div></div>`).join('')+(rec.length>60?`<div class="gd-ri">+ ${rec.length-60} more…</div>`:'')+`</div>`;
+  }
+  if(chips)h+=`<div class="gd-chips">${chips}</div>`;
+  h+=`<div class="gd-tabs">`+GD_ORDER.map(d=>`<button class="${GD.dim===d?'on':''}" ${GD.f[d]?'disabled':''} onclick="gdSetDim('${d}')">By ${GD_LBL[d].toLowerCase()}</button>`).join('')+`</div>
+     <div class="gd-tools"><input id="gd-q" class="fi" placeholder="Search ${GD_LBL[GD.dim].toLowerCase()}…" value="${gdH(GD.q)}" oninput="gdSearch(this.value)">
+     <button class="gd-tog ${GD.rem?'on':''}" onclick="gdToggleRem()">${GD.rem?'✓ ':''}Still to find only</button></div><div class="gd-list">`;
+  if(!list.length)h+=`<div style="padding:22px;text-align:center;color:var(--text3);font-weight:800;">Nothing to show</div>`;
+  h+=list.slice(0,300).map((o,i)=>{const p=o.expected?Math.min(100,100*o.seen/o.expected):0,done=o.remaining<=0;
+    return `<div class="gd-item ${done?'done':''}" onclick="gdPick(${i})"><div class="gd-it-top"><div class="gd-it-name">${gdH(gdName(GD.dim,o.key))}</div>
+      <div class="gd-it-n">${o.seen}<span>/${o.expected}</span></div></div><div class="gd-bar sm"><i style="width:${p}%"></i></div>
+      <div class="gd-it-sub">${done?'✓ all seen':`<b>${o.remaining}</b> still to find`}</div></div>`;}).join('')+(list.length>300?`<div style="padding:12px;text-align:center;color:var(--text3);">Showing top 300 — use search to narrow.</div>`:'')+`</div>`;
+  el.innerHTML=h;
+  if(keepFocus){const q=document.getElementById('gd-q');if(q){q.focus();const n=q.value.length;try{q.setSelectionRange(n,n);}catch(e){}}}
+}
+/* ══ END PROJECT GUIDE ═════════════════════════════════════════════ */
+
 function go(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nb').forEach(b=>b.classList.remove('on'));
@@ -2027,6 +2148,7 @@ function go(name){
   if(nb)nb.classList.add('on');
   if(name==='register')resetForm();
   if(name==='spool')renderSpool();
+  if(name==='guide')renderGuide();
   if(name==='audit')renderAudit();
   if(name==='history')renderHistory();
 }
