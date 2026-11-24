@@ -1023,11 +1023,12 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <div class="f3"><div class="fg"><div class="fl">Project</div><select class="fi" id="rc-project" onchange="rcProjectChanged()"><option value="">Select a project…</option></select></div></div></div>
       <div id="rc-body" style="display:none;">
         <div class="card"><div class="card-ttl">2. Client FAR <span>upload, validate, commit snapshot</span></div><div id="rc-snap"></div></div>
-        <div class="card"><div class="card-ttl">3. Location mapping <span>FAR location names → project locations</span></div><div id="rc-map"></div></div>
-        <div class="card"><div class="card-ttl">4. Location coverage <span>controls Missing vs Not yet verified</span></div><div id="rc-cov"></div></div>
+        <div class="card"><div class="card-ttl">3. Location mapping <span>only if the FAR has locations</span></div><div id="rc-map"></div></div>
+        <div class="card"><div class="card-ttl">4. Exercise status <span>controls Missing vs Not yet verified</span></div><div id="rc-cov"></div></div>
         <div class="card"><div class="card-ttl">5. Matching settings <span>this project only</span></div><div id="rc-set"></div></div>
         <div class="card"><div class="card-ttl">6. Run &amp; summary</div><div id="rc-run"></div></div>
-        <div class="card"><div class="card-ttl">7. Results <span>side by side, FAR beside physical verification</span></div><div id="rc-res"></div></div>
+        <div class="card"><div class="card-ttl">7. Field Guide <span>what field officers see in the Field App</span></div><div id="rc-guide"></div></div>
+        <div class="card"><div class="card-ttl">8. Results <span>side by side, FAR beside physical verification</span></div><div id="rc-res"></div></div>
       </div>
     </div>
 
@@ -4407,131 +4408,272 @@ function show(name){
   if(name==='import'){initImportPanel();}
 }
 
-// ── FAR Reconciliation module (Phase 1) ──
-/* ── RC ENGINE (pure; no DOM, no network) ─────────────────────────── */
+// ── FAR Reconciliation module ──
+/* ── RC ENGINE v2 (pure; no DOM, no network) ──────────────────────────
+   Levels, strictest first (each works only on what is still unmatched):
+     L2-serial / L2-chassis / L2-engine  identifier equal on both sides      → auto-accept
+     L3   exact normalised name + location (only if the FAR has locations)  → auto-accept
+     L3N  exact normalised name, any location (auto-on when FAR has no loc)  → auto-accept
+     L4   fuzzy name (bigram Dice ≥ threshold)                               → review (configurable)
+     L4T  token containment (e.g. "LG 55 Television" ⊂ "LG 55 Nano … Television") → review (configurable)
+     L5   same product type (last word of the name) + compatible category     → review (configurable)
+   LOCATION RULE: if a FAR line has a location it can only match captures in that same location (all levels above).
+   Leftover located lines may then match captures in ANOTHER location (X-levels: identifier or exact name) — review only.
+   Always one-to-one. Deterministic: same inputs + settings → same result.
+   Location rule: when the FAR carries no location, a matched/probable FAR line is
+   taken to be at the location of the physical capture it matched.            */
+const RC_STOP=new Set(['and','the','of','for','with','a','an','in','on','to','set']);
 function rcNorm(s){
   if(s==null) return '';
   return String(s).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
     .replace(/&/g,' and ').replace(/[^a-z0-9]+/g,' ').trim();
 }
-function rcCmpNum(a,b,dir){            // null/NaN always sorts last
+function rcIdNorm(v,junk){
+  if(v==null) return '';
+  const s=String(v).toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(s.length<5) return '';
+  if(junk&&junk.has(rcNorm(v))) return '';
+  if(/^(.)\1+$/.test(s)) return '';
+  return s;
+}
+function rcTokens(s){ return [...new Set(rcNorm(s).split(' ').filter(t=>t&&!RC_STOP.has(t)))]; }
+function rcDice(a,b){
+  if(!a||!b) return 0; if(a===b) return 1; if(a.length<2||b.length<2) return 0;
+  const m=new Map(); for(let i=0;i<a.length-1;i++){const g=a.substr(i,2); m.set(g,(m.get(g)||0)+1);}
+  let hit=0; for(let i=0;i<b.length-1;i++){const g=b.substr(i,2),c=m.get(g); if(c>0){hit++; m.set(g,c-1);}}
+  return 2*hit/(a.length+b.length-2);
+}
+function rcCmpNum(a,b,dir){
   const an=(a==null||isNaN(a)), bn=(b==null||isNaN(b));
   if(an&&bn) return 0; if(an) return 1; if(bn) return -1;
   return dir==='asc' ? a-b : b-a;
 }
-function rcCmpDate(a,b){               // oldest first, null last
-  if(!a&&!b) return 0; if(!a) return 1; if(!b) return -1;
-  return a<b?-1:a>b?1:0;
-}
+function rcCmpDate(a,b){ if(!a&&!b) return 0; if(!a) return 1; if(!b) return -1; return a<b?-1:a>b?1:0; }
 function rcCmpStr(a,b){ return String(a).localeCompare(String(b),'en',{numeric:true}); }
 
-/* input: { far:[{id,row_no,asset_code,description,location,department,nbv,acquisition_date,...}],
-            pv:[{id,barcode,name,location,department,custodian,approval_status}],
-            locMap:{normFarLoc:targetLabel}, coverage:{normLoc:'completed'|...},
-            settings:{nbv_priority:'high'|'low'|'far_order'} }
-   output: { results:[...], summary:{...} }  — deterministic for the same inputs */
+const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
+
 function rcEngine(inp){
-  const far=inp.far||[], pv=inp.pv||[], locMap=inp.locMap||{}, cov=inp.coverage||{};
-  const prio=(inp.settings&&inp.settings.nbv_priority)||'high';
+  const far=inp.far||[], pv=inp.pv||[], locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
+  const prio=st.nbv_priority||'high', thr=(st.fuzzy_threshold>0?st.fuzzy_threshold:85)/100;
+  const junk=new Set((st.junk||[]).map(rcNorm));
+  const act=k=>(st[k]==='accept'?'matched':'review');
   const locKey=raw=>{ const k=rcNorm(raw); if(!k) return ''; const m=locMap[k]; return rcNorm(m||raw); };
 
-  // 1. PREPARE
-  const farP=far.map(r=>({r, lk:locKey(r.location), dk:rcNorm(r.description)}));
-  const pvP =pv.map(a=>({a, lk:rcNorm(a.location),  dk:rcNorm(a.name)}));
-  const skipFar=farP.filter(x=>!x.lk||!x.dk).length, skipPv=pvP.filter(x=>!x.lk||!x.dk).length;
-
-  // 2. LEVEL L3 — description + location, one-to-one inside each group
-  const fg=new Map(), pg=new Map();
-  farP.forEach(x=>{ if(!x.lk||!x.dk) return; const k=x.lk+'||'+x.dk; (fg.get(k)||fg.set(k,[]).get(k)).push(x); });
-  pvP.forEach(x=>{ if(!x.lk||!x.dk) return; const k=x.lk+'||'+x.dk; (pg.get(k)||pg.set(k,[]).get(k)).push(x); });
+  const farP=far.map(r=>({r, fam:rcNorm(String(r.category||'').split(/[-\/]/)[0]), head:(rcNorm(r.description).split(' ').pop()||''), lk:locKey(r.location), dk:rcNorm(r.description), tok:rcTokens(r.description),
+    ids:{serial:rcIdNorm(r.serial,junk), chassis:rcIdNorm(r.chassis,junk), engine:rcIdNorm(r.engine,junk)}}));
+  const pvP=pv.map(a=>({a, cat:rcNorm((a.category||'')+' '+(a.sub_category||'')), lk:rcNorm(a.location), dk:rcNorm(a.name), tok:rcTokens(a.name),
+    ids:{serial:rcIdNorm(a.serial,junk), chassis:rcIdNorm(a.chassis,junk), engine:rcIdNorm(a.engine,junk)}}));
+  pvP.forEach(x=>{x.head=(x.dk.split(' ').pop()||'');});
+  const farHasLoc=farP.length>0 && farP.filter(x=>x.lk).length/farP.length>=0.5;
+  const nameOnly=st.name_only==='on' || (st.name_only!=='off' && !farHasLoc);
 
   const farCmp=(p,q)=>{
     let c=0;
-    if(prio==='high') c=rcCmpNum(p.r.nbv,q.r.nbv,'desc');
-    else if(prio==='low') c=rcCmpNum(p.r.nbv,q.r.nbv,'asc');
+    if(prio==='high') c=rcCmpNum(p.r.nbv,q.r.nbv,'desc'); else if(prio==='low') c=rcCmpNum(p.r.nbv,q.r.nbv,'asc');
     if(c) return c;
     if(prio!=='far_order'){ c=rcCmpDate(p.r.acquisition_date,q.r.acquisition_date); if(c) return c; }
-    return (p.r.row_no||0)-(q.r.row_no||0) || rcCmpStr(p.r.asset_code,q.r.asset_code);
+    return (p.r.row_no||0)-(q.r.row_no||0) || rcCmpStr(p.r.id,q.r.id);
   };
   const pvCmp=(p,q)=>rcCmpStr(p.a.barcode,q.a.barcode);
+  [...farP].sort(farCmp).forEach((x,i)=>{x.rank=i;});
 
-  const matchedFar=new Map(); // far id -> {pv, basis}
-  const matchedPv=new Set();
-  const keys=[...fg.keys()].filter(k=>pg.has(k)).sort();   // sorted → deterministic
-  keys.forEach(k=>{
-    const F=fg.get(k).slice().sort(farCmp), P=pg.get(k).slice().sort(pvCmp);
-    const basis=(F.length===1&&P.length===1)?'unique':'group_assigned';
-    const n=Math.min(F.length,P.length);
-    for(let i=0;i<n;i++){ matchedFar.set(F[i].r.id,{pv:P[i].a,basis}); matchedPv.add(P[i].a.id); }
-  });
+  let unF=farP.slice(), unP=pvP.slice();
+  const M=[];
+  const take=(f,p,level,basis,conf,outcome)=>{ f.done=true; p.done=true; M.push({f,p,level,basis,conf,outcome}); };
+  const sweep=()=>{ unF=unF.filter(x=>!x.done); unP=unP.filter(x=>!x.done); };
 
-  // 3. LEFTOVERS + OUTCOMES
-  const results=[]; const S={
-    far_total:far.length, pv_total:pv.length, matched:0, missing:0, not_yet_verified:0, surplus:0,
-    pending_matched:0, group_assigned:0, unique:0, nbv_total:0, nbv_matched:0, nbv_missing:0, nbv_not_yet_verified:0,
-    by_level:{L3:0}, by_location:{}, by_department:{}, skipped_far:skipFar, skipped_pv:skipPv,
-    unmapped_locations:[], nbv_priority:prio
+  // LOCATION RULE: a FAR line that has a location may only match captures in that same location.
+  //   scope 'loc'   = FAR lines with a location, PV in the same location (mandatory gate)
+  //   scope 'free'  = FAR lines without a location, PV anywhere
+  //   scope 'cross' = leftover located FAR lines vs PV in ANOTHER location → review only, flagged
+  const inScope=(f,scope)=>scope==='free'?!f.lk:!!f.lk;
+  const gateOK=(f,p,scope)=>scope==='loc'?(p.lk===f.lk):true;
+  const kPre=(x,scope)=>scope==='loc'?x.lk+'##':'';
+  const exactLevel=(level,keyF,keyP,outcome,scope)=>{
+    const fg=new Map(), pg=new Map();
+    unF.forEach(x=>{ if(!inScope(x,scope)) return; const b=keyF(x); if(b) { const k=kPre(x,scope)+b; (fg.get(k)||fg.set(k,[]).get(k)).push(x);} });
+    // a capture with a blank location never matches a located FAR line
+    unP.forEach(x=>{ if((scope==='loc'||scope==='cross')&&!x.lk) return; const b=keyP(x); if(b){ const k=kPre(x,scope)+b; (pg.get(k)||pg.set(k,[]).get(k)).push(x);} });
+    [...fg.keys()].filter(k=>pg.has(k)).sort().forEach(k=>{
+      const F=fg.get(k).sort(farCmp), P=pg.get(k).sort(pvCmp);
+      const basis=(F.length===1&&P.length===1)?'unique':'group_assigned';
+      for(let i=0;i<Math.min(F.length,P.length);i++) take(F[i],P[i],level,basis,100,outcome);
+    });
+    sweep();
   };
-  const locRow=lab=>S.by_location[lab]||(S.by_location[lab]={expected:0,matched:0,missing:0,not_yet_verified:0});
-  const depRow=d=>S.by_department[d]||(S.by_department[d]={expected:0,matched:0,missing:0,not_yet_verified:0});
-  const unm=new Set();
+  const scoredLevel=(level,scoreFn,outcome,scope)=>{
+    if(!unF.length||!unP.length) return;
+    const df=new Map(); unP.forEach(p=>p.tok.forEach(t=>df.set(t,(df.get(t)||0)+1)));
+    const maxDf=Math.max(60,Math.ceil(unP.length*0.05)), idx=new Map();
+    unP.forEach(p=>p.tok.forEach(t=>{ if(df.get(t)<=maxDf) (idx.get(t)||idx.set(t,[]).get(t)).push(p); }));
+    const pairs=[];
+    unF.forEach(f=>{
+      if(!inScope(f,scope)) return;
+      const seen=new Set();
+      f.tok.forEach(t=>(idx.get(t)||[]).forEach(p=>{
+        if(seen.has(p)||!gateOK(f,p,scope)) return; seen.add(p);
+        const s=scoreFn(f,p); if(s>0) pairs.push({f,p,s});
+      }));
+    });
+    pairs.sort((a,b)=>b.s-a.s || a.f.rank-b.f.rank || pvCmp(a.p,b.p));
+    pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,level,'unique',Math.round(c.s*100),outcome); });
+    sweep();
+  };
+  const typeLevel=(outcome,scope)=>{
+    const pg=new Map(); unP.slice().sort(pvCmp).forEach(p=>{ if(p.head.length>2) (pg.get(p.head)||pg.set(p.head,[]).get(p.head)).push(p); });
+    unF.slice().sort(farCmp).forEach(f=>{
+      if(!inScope(f,scope)||f.head.length<=2) return;
+      const g=pg.get(f.head); if(!g) return;
+      const p=g.find(p=>!p.done && gateOK(f,p,scope) && (!f.fam || p.cat.includes(f.fam)));
+      if(p) take(f,p,'L5','unique',60,outcome);
+    });
+    sweep();
+  };
+  const tokFn=(f,p)=>{
+    const A=f.tok,B=p.tok; if(Math.min(A.length,B.length)<2) return 0;
+    const [S,L]=A.length<=B.length?[A,B]:[B,A], set=new Set(L);
+    if(!S.every(t=>set.has(t))) return 0;
+    const sc=S.length/L.length; return sc>=0.5?sc:0;
+  };
+  const diceFn=(f,p)=>{ const s=rcDice(f.dk,p.dk); return s>=thr?s:0; };
 
-  farP.slice().sort((p,q)=>(p.r.row_no||0)-(q.r.row_no||0)||rcCmpStr(p.r.asset_code,q.r.asset_code)).forEach(x=>{
-    const r=x.r, nbv=(r.nbv==null||isNaN(r.nbv))?0:Number(r.nbv);
-    const lab=(locMap[rcNorm(r.location)]||r.location||'(no location)').toString().trim()||'(no location)';
-    const dep=(r.department||'(no department)').toString().trim()||'(no department)';
-    if(r.location && !locMap[rcNorm(r.location)]) unm.add(String(r.location).trim());
-    S.nbv_total+=nbv; locRow(lab).expected++; depRow(dep).expected++;
-    const m=matchedFar.get(r.id);
+  ['loc','free'].forEach(scope=>{
+    if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('L2-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'matched', scope));
+    if(st.lvl_name!==false) exactLevel(scope==='loc'?'L3':'L3N', x=>x.dk, x=>x.dk, 'matched', scope);
+    if(st.lvl_fuzzy!==false) scoredLevel('L4', diceFn, act('fuzzy_action'), scope);
+    if(st.lvl_token!==false) scoredLevel('L4T', tokFn, act('token_action'), scope);
+    if(st.lvl_type!==false) typeLevel(act('type_action'), scope);
+  });
+  if(st.cross_location!=='off'){        // found in a different location than the FAR says → always human-reviewed
+    if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('X-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'review', 'cross'));
+    if(st.lvl_name!==false) exactLevel('X-name', x=>x.dk, x=>x.dk, 'review', 'cross');
+  }
+
+  const byFar=new Map(M.map(m=>[m.f.r.id,m]));
+  const results=[];
+  farP.slice().sort((p,q)=>(p.r.row_no||0)-(q.r.row_no||0)||rcCmpStr(p.r.id,q.r.id)).forEach(x=>{
+    const m=byFar.get(x.r.id);
     if(m){
-      const pending=!(m.pv.approval_status==='approved');
-      S.matched++; S.by_level.L3++; S[m.basis]++; S.nbv_matched+=nbv; if(pending) S.pending_matched++;
-      locRow(lab).matched++; depRow(dep).matched++;
-      results.push({far_record_id:r.id, barcode:m.pv.barcode, outcome:'matched', level:'L3', basis:m.basis, confidence:100,
-        pv_name:m.pv.name||null, pv_location:m.pv.location||null, pv_department:m.pv.department||null,
-        pv_custodian:m.pv.custodian||null, pv_approval:m.pv.approval_status||'pending'});
+      results.push({far_record_id:x.r.id, barcode:m.p.a.barcode, outcome:m.outcome, level:m.level, basis:m.basis, confidence:m.conf,
+        pv_name:m.p.a.name||null, pv_location:m.p.a.location||null, pv_department:m.p.a.department||null,
+        pv_custodian:m.p.a.custodian||null, pv_approval:m.p.a.approval_status||'pending',
+        discrepancies:(x.lk&&m.p.lk!==x.lk)?{location:{far:locMap[rcNorm(x.r.location)]||x.r.location,pv:m.p.a.location||''}}:null});
     } else {
-      const done = x.lk && cov[x.lk]==='completed';
-      const oc = done?'missing':'not_yet_verified';
-      S[oc]++; S['nbv_'+(done?'missing':'not_yet_verified')]+=nbv;
-      locRow(lab)[oc]++; depRow(dep)[oc]++;
-      results.push({far_record_id:r.id, barcode:null, outcome:oc, level:null, basis:null, confidence:null,
+      const done = x.lk ? cov[x.lk]==='completed' : cov['__project__']==='completed';
+      results.push({far_record_id:x.r.id, barcode:null, outcome:done?'missing':'not_yet_verified', level:null, basis:null, confidence:null,
         pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null});
     }
   });
-  pvP.filter(x=>!matchedPv.has(x.a.id)).sort((p,q)=>pvCmp(p,q)).forEach(x=>{
-    S.surplus++;
-    results.push({far_record_id:null, barcode:x.a.barcode, outcome:'surplus', level:null, basis:null, confidence:null,
-      pv_name:x.a.name||null, pv_location:x.a.location||null, pv_department:x.a.department||null,
-      pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending'});
+  pvP.filter(x=>!x.done).sort(pvCmp).forEach(x=>results.push({far_record_id:null, barcode:x.a.barcode, outcome:'surplus', level:null, basis:null, confidence:null,
+    pv_name:x.a.name||null, pv_location:x.a.location||null, pv_department:x.a.department||null,
+    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending'}));
+
+  const summary=rcSummarize(far,results,{locMap,prio});
+  summary.skipped_far=farP.filter(x=>!x.dk).length; summary.skipped_pv=pvP.filter(x=>!x.dk).length;
+  summary.far_has_location=farHasLoc; summary.name_only_used=nameOnly; summary.pv_total=pv.length;
+  return {results, summary};
+}
+
+/* FAR location used for reporting: the FAR's own (after mapping), else — for matched/probable
+   lines — the location of the physical capture; unmatched lines without a FAR location stay blank. */
+function rcEffLocation(f,r,locMap){
+  if(f&&f.location&&String(f.location).trim()) return (locMap&&locMap[rcNorm(f.location)])||String(f.location).trim();
+  if(r&&(r.outcome==='matched'||r.outcome==='review'||r.outcome==='matched_discrepancy')&&r.pv_location) return String(r.pv_location).trim();
+  return '';
+}
+
+/* Summary derived purely from the result rows — so it can be recomputed after a review decision. */
+function rcSummarize(far,results,ctx){
+  ctx=ctx||{}; const locMap=ctx.locMap||{}, byId=new Map(far.map(r=>[r.id,r]));
+  const z=()=>({count:0,cost:0,dep:0,nbv:0});
+  const S={far_total:far.length,matched:0,review:0,missing:0,not_yet_verified:0,surplus:0,pending_matched:0,unique:0,group_assigned:0,
+    by_level:{},by_status:{matched:z(),review:z(),unmatched:z(),surplus:z()},by_location:{},by_department:{},by_category:{},unmapped_locations:[],nbv_priority:ctx.prio||'high',
+    nbv_missing:0,nbv_not_yet_verified:0};
+  const row=(o,k)=>o[k]||(o[k]={expected:0,matched:0,review:0,missing:0,not_yet_verified:0});
+  const num=v=>(v==null||isNaN(v))?0:Number(v), unm=new Set();
+  results.forEach(r=>{
+    if(!r.far_record_id){ S.surplus++; S.by_status.surplus.count++; return; }
+    const f=byId.get(r.far_record_id); if(!f) return;
+    const loc=rcEffLocation(f,r,locMap)||'(no location)';
+    const dep=(f.department||'(no department)').toString().trim()||'(no department)';
+    const cat=(f.category||'(no category)').toString().trim()||'(no category)';
+    if(f.location&&!locMap[rcNorm(f.location)]) unm.add(String(f.location).trim());
+    const oc=r.outcome==='matched_discrepancy'?'matched':r.outcome;
+    [row(S.by_location,loc),row(S.by_department,dep),row(S.by_category,cat)].forEach(o=>{o.expected++; if(o[oc]!==undefined) o[oc]++;});
+    S[oc]=(S[oc]||0)+1;
+    const g=(oc==='missing'||oc==='not_yet_verified')?'unmatched':oc, b=S.by_status[g]||(S.by_status[g]=z());
+    b.count++; b.cost+=num(f.cost); b.dep+=num(f.depreciation); b.nbv+=num(f.nbv);
+    if(oc==='missing') S.nbv_missing+=num(f.nbv); if(oc==='not_yet_verified') S.nbv_not_yet_verified+=num(f.nbv);
+    if(oc==='matched'||oc==='review'){
+      S.by_level[r.level]=(S.by_level[r.level]||0)+1;
+      if(oc==='matched'){ if(r.basis==='unique')S.unique++; else S.group_assigned++; if(r.pv_approval!=='approved')S.pending_matched++; }
+    }
   });
   S.unmapped_locations=[...unm].sort();
-  S.resolved_pct = S.far_total ? Math.round(1000*S.matched/S.far_total)/10 : 0;
-  S.not_seen = S.missing+S.not_yet_verified;
-  S.nbv_not_seen = S.nbv_missing+S.nbv_not_yet_verified;
-  return {results, summary:S};
+  S.resolved_pct=S.far_total?Math.round(1000*S.matched/S.far_total)/10:0;
+  S.probable_pct=S.far_total?Math.round(1000*(S.matched+S.review)/S.far_total)/10:0;
+  S.not_seen=S.missing+S.not_yet_verified; S.nbv_not_seen=S.nbv_missing+S.nbv_not_yet_verified;
+  return S;
+}
+
+/* FIELD GUIDE (Phase 1B): a value-free summary field officers can read.
+   NO nbv / cost / depreciation / serial numbers ever enter it.
+   rows: [location, category, product, expected, seen]   (seen = matched + probable)
+   recent: FAR lines bought within `recentDays` of the FAR's latest purchase date that are still unseen. */
+function rcBuildGuide(far,results,ctx){
+  ctx=ctx||{}; const locMap=ctx.locMap||{}, recentDays=ctx.recentDays>0?ctx.recentDays:180;
+  const byId=new Map(far.map(r=>[r.id,r])), rows=new Map(), recent=[];
+  let ref=''; far.forEach(f=>{ if(f.acquisition_date&&f.acquisition_date>ref) ref=f.acquisition_date; });
+  let cutoff=''; if(ref){ const d=new Date(ref+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()-recentDays); cutoff=d.toISOString().slice(0,10); }
+  const seenOC=new Set(['matched','review','matched_discrepancy']);
+  let expected=0, seen=0;
+  results.forEach(r=>{
+    if(!r.far_record_id) return; const f=byId.get(r.far_record_id); if(!f) return;
+    const loc=rcEffLocation(f,r,locMap)||'(location not on FAR)';
+    const cat=(f.category||'(no category)').toString().trim()||'(no category)';
+    const prod=(f.description||'(no description)').toString().trim()||'(no description)';
+    const k=loc+'\u0001'+cat+'\u0001'+prod, row=rows.get(k)||rows.set(k,[loc,cat,prod,0,0]).get(k);
+    const isSeen=seenOC.has(r.outcome); row[3]++; expected++; if(isSeen){row[4]++; seen++;}
+    if(!isSeen && cutoff && f.acquisition_date && f.acquisition_date>=cutoff)
+      recent.push({code:f.asset_code,desc:prod,cat,loc,acq:f.acquisition_date});
+  });
+  recent.sort((a,b)=>b.acq.localeCompare(a.acq)||String(a.code).localeCompare(String(b.code),'en',{numeric:true}));
+  return {rows:[...rows.values()].sort((a,b)=>a[0].localeCompare(b[0])||a[1].localeCompare(b[1])||a[2].localeCompare(b[2])),
+          recent:recent.slice(0,600), recent_total:recent.length, recent_days:recentDays, far_as_at:ref||null, expected, seen,
+          far_has_location: far.length>0 && far.filter(f=>f.location&&String(f.location).trim()).length/far.length>=0.5};
 }
 /* ── END RC ENGINE ─────────────────────────────────────────────────── */
 
 /* ══════════════════════════════════════════════════════════════════
-   FAR RECONCILIATION MODULE — Phase 1 (Foundation)
+   FAR RECONCILIATION MODULE — Phase 1+ (Foundation, identifier/name/type levels, review, client report)
    Self-contained. Reads `assets` (never writes). Writes only recon_* tables
    and one config key per project (recon_settings:<projectId>).
    Every call uses the signed-in user's token (authToken()) and checks the
    HTTP status — a rejected write is reported, never silently ignored.
    ══════════════════════════════════════════════════════════════════ */
 const RC={pid:null,snap:null,far:[],farById:{},maps:{},cov:{},settings:null,runs:[],runId:null,results:[],page:0,filter:'all',q:'',up:null,busy:false};
-const RC_DEFAULT_SETTINGS={nbv_priority:'high',count_mode:'approved_pending',junk:['n/a','na','none','unknown','nil','null','tbc','tba','-','--']};
-const RC_FIELDS=[['code','Asset code *'],['desc','Description *'],['location','Location *'],['category','Category'],['department','Department / Cost Centre'],['custodian','Custodian'],['serial','Serial number'],['nbv','Net book value (NBV)'],['cost','Cost'],['acq','Acquisition date']];
-const RC_SYN={code:['asset code','asset no','asset number','asset id','asset tag','tag no','fa no','fixed asset no','fa code','asset reference','asset'],
- desc:['description','asset description','item description','asset name','item name','name','item'],
- category:['category','asset category','asset class','class','asset type','type','group'],
- location:['location','asset location','site','branch','room','building','area'],
- department:['department','dept','cost centre','cost center','division','unit'],
+const RC_DEFAULT_SETTINGS={nbv_priority:'high',count_mode:'approved_pending',junk:['n/a','na','none','unknown','nil','null','tbc','tba','-','--'],
+  cross_location:'review',recent_days:180,fuzzy_threshold:85,lvl_id:true,lvl_name:true,lvl_fuzzy:true,lvl_token:true,lvl_type:true,fuzzy_action:'review',token_action:'review',type_action:'review'};
+const RC_FIELDS=[['code','Asset code *'],['code2','Alternate / old asset code'],['desc','Description / product name *'],['name2','Alternate name'],['class','Asset class'],['category','Category'],
+  ['location','Location'],['department','Department / Cost Centre'],['custodian','Custodian'],['serial','Serial / registration no'],['chassis','Chassis no'],['engine','Engine no'],
+  ['nbv','Net book value (NBV)'],['cost','Cost / acquisition'],['depr','Depreciation'],['acq','Acquisition date']];
+const RC_SYN={
+ code:['asset code','asset no','asset number','asset id','asset tag','tag no','fa no','fa number','fixed asset no','fixed asset number','fixed asset code','fa code','asset reference','asset ref'],
+ code2:['asset number 2','asset no 2','fixed asset number 2','fixed asset no 2','alt code','alternate code','old asset code','old asset number','old asset no','legacy code','previous asset code'],
+ desc:['product name','description','asset description','item description','product','item'],
+ name2:['name','asset name','item name','alternate name','alt description'],
+ class:['class','asset class'],
+ category:['category','asset category','fixed asset category','group','asset group','type','asset type'],
+ location:['location','asset location','site','branch','room','building','area','location name'],
+ department:['department','dept','cost centre','cost center','division','unit','cost centre department'],
  custodian:['custodian','assigned to','employee','owner','responsible person','officer','user'],
- serial:['serial','serial no','serial number','s n','sn'],
+ serial:['serial','serial no','serial number','serial registration no','serial regristrationno','serial reg no','registration no','registration number','reg no','s n','sn'],
+ chassis:['chassis','chassis no','chassiss no','chassis number','vin'],
+ engine:['engine','engine no','engine number'],
  nbv:['nbv','net book value','book value','carrying amount','carrying value','wdv','written down value'],
- cost:['cost','purchase cost','acquisition cost','original cost','historical cost','purchase price','gross value'],
+ cost:['cost','total acquisition','total cost','purchase cost','acquisition cost','original cost','historical cost','purchase price','gross value'],
+ depr:['depreciation','total depreciation','accumulated depreciation','acc depreciation','accumulated depr'],
  acq:['acquisition date','purchase date','date acquired','date of purchase','date of acquisition','capitalisation date','capitalization date','in service date','date']};
 
 function rcH(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -4542,6 +4684,8 @@ function rcWho(){return (currentUser&&(currentUser.username||currentUser.name))|
 function rcFmt(n){return (n==null||isNaN(n))?'—':Number(n).toLocaleString('en-NG',{maximumFractionDigits:2});}
 function rcProj(){return allProjects.find(p=>p.id===RC.pid)||null;}
 function rcProjLocs(){const p=rcProj();return (p&&Array.isArray(p.locations)?p.locations:[]).map(l=>typeof l==='string'?l:(l&&l.name)||'').filter(Boolean);}
+function rcCovKey(l){return l==='__project__'?'__project__':rcNorm(l);}
+function rcFarHasLoc(){return RC.far.length>0&&RC.far.filter(r=>r.location&&String(r.location).trim()).length/RC.far.length>=0.5;}
 
 async function rcFetch(path,opts={}){
   const r=await fetch(SUPABASE_URL+'/rest/v1/'+path,{...opts,headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),'Content-Type':'application/json',...(opts.headers||{})}});
@@ -4585,11 +4729,12 @@ async function rcLoadProject(){
     const maps=await rcFetch(`recon_mappings?project_id=eq.${rcQ(pid)}&kind=eq.location&select=*`);
     RC.maps={};maps.forEach(m=>RC.maps[m.source_value]=m);
     const cov=await rcFetch(`recon_location_coverage?project_id=eq.${rcQ(pid)}&select=*`);
-    RC.cov={};cov.forEach(c=>RC.cov[rcNorm(c.location)]=c);
+    RC.cov={};cov.forEach(c=>RC.cov[rcCovKey(c.location)]=c);
     RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id&order=created_at.desc`);
     const cfg=await rcFetch(`config?company_id=eq.${rcQ(cid)}&key=eq.${rcQ('recon_settings:'+pid)}&select=value`);
     let s=null;try{s=cfg[0]?JSON.parse(cfg[0].value):null;}catch(e){}
     RC.settings={...RC_DEFAULT_SETTINGS,...(s||{})};
+    RC.guide=null;try{const g=await rcFetch(`recon_field_guide?project_id=eq.${rcQ(pid)}&select=id,run_id,published_by,published_at,recent_days:data->recent_days,expected:data->expected,seen:data->seen,recent_total:data->recent_total`);RC.guide=g[0]||null;}catch(e){RC.guide=null;}
     if(!RC.runs.some(r=>r.id===RC.runId)) RC.runId=RC.runs[0]?RC.runs[0].id:null;
     rcBusy(false);
     rcRenderAll();
@@ -4600,16 +4745,16 @@ async function rcLoadProject(){
     else toast('Could not load: '+e.message,'err');
   }
 }
-function rcRenderAll(){rcRenderSnap();rcRenderMap();rcRenderCov();rcRenderSettings();rcRenderRunCard();}
+function rcRenderAll(){rcRenderSnap();rcRenderMap();rcRenderCov();rcRenderSettings();rcRenderRunCard();rcRenderGuide();}
 
 /* ── 1. FAR upload, validation, snapshot ─────────────────────────── */
 function rcRenderSnap(){
   const el=document.getElementById('rc-snap');let h='';
   if(RC.snap){
-    const m=RC.snap.meta||{};
+    const m=RC.snap.meta||{},dups=(m.duplicates||[]).length;
     h+=`<div style="padding:12px 14px;border:2px solid var(--border);border-radius:10px;background:var(--surf2);margin-bottom:12px;">
       <div style="font-weight:900;">🔒 ${rcH(RC.snap.name)} <span class="badge ba" style="margin-left:6px;">COMMITTED</span></div>
-      <div style="font-size:12px;color:var(--text2);margin-top:4px;">${rcFmt(RC.snap.row_count)} FAR lines · uploaded by ${rcH(RC.snap.uploaded_by||'—')} · ${RC.snap.committed_at?new Date(RC.snap.committed_at).toLocaleString():''}${m.excluded?` · <b>${m.excluded} rows excluded</b> (blank/duplicate asset codes)`:''}</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px;">${rcFmt(RC.snap.row_count)} FAR lines · uploaded by ${rcH(RC.snap.uploaded_by||'—')} · ${RC.snap.committed_at?new Date(RC.snap.committed_at).toLocaleString():''}${dups?` · ${dups} repeated asset code${dups>1?'s':''} kept as separate lines`:''}</div>
       <div style="font-size:11px;color:var(--text3);margin-top:4px;">Locked as evidence of what the client claimed. Uploading a new file replaces it for future runs; earlier runs keep pointing at their own snapshot.</div></div>`;
   }
   h+=`<div class="fg"><div class="fl">${RC.snap?'Upload a replacement FAR (Excel or CSV)':'Upload the client FAR (Excel or CSV)'}</div>
@@ -4623,18 +4768,21 @@ function rcHandleFile(inp){
   rd.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});RC.up={name:f.name,wb,sheet:wb.SheetNames[0]};rcLoadSheet();}catch(err){toast('Could not read file: '+err.message,'err');}};
   rd.readAsArrayBuffer(f);
 }
+function rcHdr(h){return rcNorm(h).replace(/^far /,'');}
 function rcLoadSheet(){
   const u=RC.up,aoa=XLSX.utils.sheet_to_json(u.wb.Sheets[u.sheet],{header:1,raw:true,defval:''});
   let hi=aoa.findIndex(r=>r.filter(c=>String(c).trim()!=='').length>=3); if(hi<0)hi=0;
   u.hdrIdx=hi;u.headers=(aoa[hi]||[]).map(c=>String(c).trim());u.rows=aoa.slice(hi+1);
-  const used=new Set();u.map={};const nh=u.headers.map(rcNorm);
+  const used=new Set();u.map={};const nh=u.headers.map(rcHdr);
   RC_FIELDS.forEach(([k])=>{u.map[k]=-1;});
   RC_FIELDS.forEach(([k])=>{const i=nh.findIndex((h,ix)=>!used.has(ix)&&RC_SYN[k].includes(h));if(i>=0){u.map[k]=i;used.add(i);}});
+  RC_FIELDS.forEach(([k])=>{if(u.map[k]>=0)return;const i=nh.findIndex((h,ix)=>!used.has(ix)&&h&&RC_SYN[k].some(s=>h.startsWith(s+' ')||h.endsWith(' '+s)));if(i>=0){u.map[k]=i;used.add(i);}});
+  if(u.map.desc<0&&u.map.name2>=0){u.map.desc=u.map.name2;u.map.name2=-1;}
   rcRenderUpload();
 }
 function rcSetMap(k,v){RC.up.map[k]=parseInt(v,10);rcRenderUpload();}
 function rcSetSheet(v){RC.up.sheet=v;rcLoadSheet();}
-function rcNum(v){if(v===''||v==null)return null;if(typeof v==='number')return v;const n=parseFloat(String(v).replace(/[₦,\s]/g,'').replace(/^\((.*)\)$/,'-$1'));return isNaN(n)?NaN:n;}
+function rcNum(v){if(v===''||v==null)return null;if(typeof v==='number')return v;const n=parseFloat(String(v).replace(/[₦,\s\u00a0]/g,'').replace(/^\((.*)\)$/,'-$1'));return isNaN(n)?NaN:n;}
 function rcDate(v){
   if(v===''||v==null)return null;
   if(typeof v==='number'){if(v<20000||v>80000)return NaN;const d=new Date(Math.round((v-25569)*864e5));return d.toISOString().slice(0,10);}
@@ -4643,21 +4791,24 @@ function rcDate(v){
   const t=Date.parse(s);return isNaN(t)?NaN:new Date(t).toISOString().slice(0,10);
 }
 function rcBuild(){
-  const u=RC.up,m=u.map,junk=new Set((RC.settings.junk||[]).map(rcNorm)),recs=[],iss={blank:[],dup:[],noloc:0,nodesc:0,junkSerial:0,badNbv:0,badDate:0};
-  const g=(row,k)=>m[k]>=0?row[m[k]]:'',seen=new Set();
+  const u=RC.up,m=u.map,junk=new Set((RC.settings.junk||[]).map(rcNorm)),recs=[],iss={blank:[],dupCodes:{},dupLines:0,noloc:0,nodesc:0,junkSerial:0,badNbv:0,badDate:0};
+  const g=(row,k)=>m[k]>=0?String(row[m[k]]==null?'':row[m[k]]).replace(/\u00a0/g,' ').trim():'';
+  const raw=(row,k)=>m[k]>=0?row[m[k]]:'', cnt={};
   u.rows.forEach((row,i)=>{
     if(row.every(c=>String(c).trim()===''))return;
-    const rowNo=u.hdrIdx+2+i,code=String(g(row,'code')).trim(),desc=String(g(row,'desc')).trim(),loc=String(g(row,'location')).trim();
-    const serial=String(g(row,'serial')).trim(),nbv=rcNum(g(row,'nbv')),cost=rcNum(g(row,'cost')),acq=rcDate(g(row,'acq'));
-    if(!loc)iss.noloc++;if(!desc)iss.nodesc++;if(serial&&junk.has(rcNorm(serial)))iss.junkSerial++;
-    if(Number.isNaN(nbv)||Number.isNaN(cost))iss.badNbv++;if(Number.isNaN(acq))iss.badDate++;
-    let exclude=null;
-    if(!code){exclude='blank';iss.blank.push(rowNo);}
-    else{const k=code.toUpperCase();if(seen.has(k)){exclude='dup';iss.dup.push({row:rowNo,code});}else seen.add(k);}
-    recs.push({row_no:rowNo,asset_code:code,description:desc||null,category:String(g(row,'category')).trim()||null,location:loc||null,
-      department:String(g(row,'department')).trim()||null,custodian:String(g(row,'custodian')).trim()||null,serial:serial||null,
-      nbv:Number.isNaN(nbv)?null:nbv,cost:Number.isNaN(cost)?null:cost,acquisition_date:Number.isNaN(acq)?null:acq,_x:exclude});
+    const rowNo=u.hdrIdx+2+i;let code=g(row,'code');
+    if(!code){iss.blank.push(rowNo);code='ROW-'+rowNo;}
+    cnt[code.toUpperCase()]=(cnt[code.toUpperCase()]||0)+1;
+    const desc=g(row,'desc'),loc=g(row,'location'),serial=g(row,'serial');
+    const nbv=rcNum(raw(row,'nbv')),cost=rcNum(raw(row,'cost')),dep=rcNum(raw(row,'depr')),acq=rcDate(raw(row,'acq'));
+    if(m.location>=0&&!loc)iss.noloc++;if(!desc)iss.nodesc++;if(serial&&junk.has(rcNorm(serial)))iss.junkSerial++;
+    if([nbv,cost,dep].some(Number.isNaN))iss.badNbv++;if(Number.isNaN(acq))iss.badDate++;
+    const ok=x=>(x==null||Number.isNaN(x))?null:x;
+    recs.push({row_no:rowNo,asset_code:code,asset_code2:g(row,'code2')||null,description:desc||null,alt_description:g(row,'name2')||null,asset_class:g(row,'class')||null,
+      category:g(row,'category')||null,location:loc||null,department:g(row,'department')||null,custodian:g(row,'custodian')||null,serial:serial||null,
+      chassis:g(row,'chassis')||null,engine:g(row,'engine')||null,nbv:ok(nbv),cost:ok(cost),depreciation:ok(dep),acquisition_date:Number.isNaN(acq)?null:acq});
   });
+  Object.entries(cnt).forEach(([k,n])=>{if(n>1){iss.dupCodes[k]=n;iss.dupLines+=n;}});
   return {recs,iss};
 }
 function rcRenderUpload(){
@@ -4665,65 +4816,66 @@ function rcRenderUpload(){
   const opts=k=>`<option value="-1">— not in file —</option>`+u.headers.map((h,i)=>`<option value="${i}" ${u.map[k]===i?'selected':''}>${rcH(h||('Column '+(i+1)))}</option>`).join('');
   let h=`<div style="font-size:12px;font-weight:800;margin:6px 0;">📄 ${rcH(u.name)} — ${u.rows.length.toLocaleString()} data rows</div>`;
   if(u.wb.SheetNames.length>1)h+=`<div class="fg"><div class="fl">Sheet</div><select class="fi" onchange="rcSetSheet(this.value)">${u.wb.SheetNames.map(s=>`<option ${s===u.sheet?'selected':''}>${rcH(s)}</option>`).join('')}</select></div>`;
-  h+=`<div style="font-size:12px;font-weight:800;margin:10px 0 6px;">Match your columns <span style="font-weight:600;color:var(--text3)">(auto-detected — check before continuing)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;">`+
+  h+=`<div style="font-size:12px;font-weight:800;margin:10px 0 6px;">Match your columns <span style="font-weight:600;color:var(--text3)">(auto-detected — check before continuing; only * fields are required)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;">`+
     RC_FIELDS.map(([k,l])=>`<div class="fg" style="margin:0"><div class="fl">${l}</div><select class="fi" onchange="rcSetMap('${k}',this.value)">${opts(k)}</select></div>`).join('')+`</div>`;
-  if(u.map.code<0||u.map.desc<0||u.map.location<0){h+=`<div style="margin-top:12px;color:var(--red,#c0392b);font-weight:800;">Asset code, Description and Location columns are required.</div>`;el.innerHTML=h;return;}
-  const {recs,iss}=rcBuild(),excl=recs.filter(r=>r._x).length;u.built={recs,iss,excl};
-  const row=(l,n,bad)=>`<tr><td>${l}</td><td style="text-align:right;${n&&bad?'color:#c0392b;':''}">${rcFmt(n)}</td></tr>`;
-  h+=`<div class="card-ttl" style="margin-top:16px;font-size:14px;">Validation report</div><table class="tbl" style="max-width:520px;">
-    ${row('FAR lines read',recs.length)}${row('Blank asset code (will be excluded)',iss.blank.length,1)}${row('Duplicate asset code (2nd+ occurrence excluded)',iss.dup.length,1)}
-    ${row('Missing location (cannot match; stays unmatched)',iss.noloc,1)}${row('Missing description (cannot match; stays unmatched)',iss.nodesc,1)}
-    ${row('Junk serial numbers (ignored by matching)',iss.junkSerial)}${row('Unreadable NBV / cost values (stored blank)',iss.badNbv,1)}${row('Unreadable dates (stored blank)',iss.badDate,1)}</table>`;
-  if(iss.dup.length)h+=`<div style="font-size:11px;color:var(--text2);margin-top:6px;">Duplicate examples: ${iss.dup.slice(0,8).map(d=>rcH(d.code)+' (row '+d.row+')').join(', ')}${iss.dup.length>8?'…':''}</div>`;
-  if(iss.blank.length)h+=`<div style="font-size:11px;color:var(--text2);margin-top:4px;">Blank-code rows: ${iss.blank.slice(0,12).join(', ')}${iss.blank.length>12?'…':''}</div>`;
-  h+=`<div style="margin:14px 0 8px;font-size:12px;">${excl?`<label style="display:flex;gap:8px;align-items:center;font-weight:800;"><input type="checkbox" id="rc-accept"> I accept that ${excl} line${excl>1?'s':''} will be excluded because the asset code (the FAR's unique key) is blank or repeated. Fix the file instead if these should count.</label>`:'<span style="color:var(--acc4);font-weight:800;">✓ Asset codes are unique — nothing excluded.</span>'}</div>
-    <button class="btn-p act-btn" onclick="rcCommit()">🔒 Commit FAR snapshot (${(recs.length-excl).toLocaleString()} lines)</button>
-    <button class="btn-s act-btn" onclick="RC.up=null;rcRenderSnap()">Cancel</button>`;
+  if(u.map.code<0||u.map.desc<0){h+=`<div style="margin-top:12px;color:#c0392b;font-weight:800;">Asset code and Description columns are required.</div>`;el.innerHTML=h;return;}
+  const {recs,iss}=rcBuild();u.built={recs,iss};
+  const nd=Object.keys(iss.dupCodes).length;
+  const row=(l,n,bad,note)=>`<tr><td>${l}${note?`<div style="font-size:10px;color:var(--text3);">${note}</div>`:''}</td><td style="text-align:right;${n&&bad?'color:#c0392b;':''}">${rcFmt(n)}</td></tr>`;
+  h+=`<div class="card-ttl" style="margin-top:16px;font-size:14px;">Validation report</div><table class="tbl" style="max-width:600px;">
+    ${row('FAR lines read',recs.length)}
+    ${row('Blank asset code',iss.blank.length,1,'kept — shown as ROW-n so each line is still reconciled')}
+    ${row('Repeated asset codes ('+nd+' codes on '+iss.dupLines+' lines)',nd,1,'kept — every line is reconciled separately, exactly as listed by the client')}
+    ${row('Missing description',iss.nodesc,1,'cannot be matched by name; stays unmatched')}
+    ${u.map.location>=0?row('Missing location',iss.noloc,1,'informational'):`<tr><td colspan="2" style="color:var(--text2);font-size:12px;">No location column: matched lines will take the location of the physical capture they match.</td></tr>`}
+    ${row('Junk serial numbers',iss.junkSerial,0,'ignored by matching')}
+    ${row('Unreadable NBV / cost / depreciation',iss.badNbv,1,'stored blank')}${row('Unreadable dates',iss.badDate,1,'stored blank')}</table>`;
+  if(nd)h+=`<div style="font-size:11px;color:var(--text2);margin-top:6px;">Repeated codes: ${Object.entries(iss.dupCodes).slice(0,10).map(([c,n])=>rcH(c)+' ×'+n).join(', ')}${nd>10?'…':''}</div>`;
+  h+=`<div style="margin-top:14px;"><button class="btn-p act-btn" onclick="rcCommit()">🔒 Commit FAR snapshot (${recs.length.toLocaleString()} lines)</button>
+    <button class="btn-s act-btn" onclick="RC.up=null;rcRenderSnap()">Cancel</button></div>`;
   el.innerHTML=h;
 }
 async function rcCommit(){
   const u=RC.up;if(!u||!u.built||RC.busy)return;
-  const {recs,excl,iss}=u.built;
-  if(excl&&!document.getElementById('rc-accept').checked){toast('Tick the box to accept the exclusions, or fix the file','err');return;}
+  const {recs,iss}=u.built;
   if(RC.snap&&!confirm('This replaces the current committed FAR for this project. Earlier runs keep their own snapshot. Continue?'))return;
-  const keep=recs.filter(r=>!r._x),cid=rcCid(),pid=RC.pid,snapId=rcUuid(),oldSnap=RC.snap;
+  const cid=rcCid(),pid=RC.pid,snapId=rcUuid(),oldSnap=RC.snap;
   rcBusy(true,'Uploading FAR snapshot…');
   try{
     await rcFetch('recon_far_snapshots',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({id:snapId,company_id:cid,project_id:pid,name:u.name,source_file:u.name,status:'draft',uploaded_by:rcWho()})});
     try{
-      await rcInsert('recon_far_records',keep.map(r=>{const {_x,...c}=r;return {...c,snapshot_id:snapId,company_id:cid,project_id:pid};}));
+      await rcInsert('recon_far_records',recs.map(r=>({...r,snapshot_id:snapId,company_id:cid,project_id:pid})));
       if(oldSnap) await rcFetch('recon_far_snapshots?id=eq.'+rcQ(oldSnap.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'superseded'})});
       try{
-        await rcFetch('recon_far_snapshots?id=eq.'+rcQ(snapId),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'committed',row_count:keep.length,committed_at:new Date().toISOString(),
-          meta:{column_map:u.map,headers:u.headers,excluded:excl,blank_rows:iss.blank.slice(0,200),duplicates:iss.dup.slice(0,200),validation:{noloc:iss.noloc,nodesc:iss.nodesc,junk_serial:iss.junkSerial,bad_numbers:iss.badNbv,bad_dates:iss.badDate}}})});
+        await rcFetch('recon_far_snapshots?id=eq.'+rcQ(snapId),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'committed',row_count:recs.length,committed_at:new Date().toISOString(),
+          meta:{column_map:u.map,headers:u.headers,blank_rows:iss.blank.slice(0,200),duplicates:Object.entries(iss.dupCodes).slice(0,300).map(([c,n])=>({code:c,lines:n})),validation:{noloc:iss.noloc,nodesc:iss.nodesc,junk_serial:iss.junkSerial,bad_numbers:iss.badNbv,bad_dates:iss.badDate}}})});
       }catch(e){ if(oldSnap) await rcFetch('recon_far_snapshots?id=eq.'+rcQ(oldSnap.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'committed'})}).catch(()=>{}); throw e; }
-    }catch(e){ await rcFetch('recon_far_snapshots?id=eq.'+rcQ(snapId),{method:'DELETE'}).catch(()=>{}); throw e; }   // draft + its lines are removed; nothing half-committed
-    RC.up=null;rcBusy(false);toast(`✅ FAR committed: ${keep.length.toLocaleString()} lines`,'ok');await rcLoadProject();
+    }catch(e){ await rcFetch('recon_far_snapshots?id=eq.'+rcQ(snapId),{method:'DELETE'}).catch(()=>{}); throw e; }
+    RC.up=null;rcBusy(false);toast(`✅ FAR committed: ${recs.length.toLocaleString()} lines`,'ok');await rcLoadProject();
   }catch(e){rcBusy(false);toast('Upload failed — nothing was committed: '+e.message,'err');}
 }
 
-/* ── 2. Location mapping ─────────────────────────────────────────── */
+/* ── 2. Location mapping (only when the FAR carries locations) ───── */
 function rcFarLocGroups(){
   const g={};RC.far.forEach(r=>{const raw=(r.location||'').trim();if(!raw)return;const k=rcNorm(raw);const o=g[k]||(g[k]={k,labels:{},n:0});o.labels[raw]=(o.labels[raw]||0)+1;o.n++;});
   return Object.values(g).sort((a,b)=>b.n-a.n);
 }
 function rcTarget(k,pl){ if(RC.maps[k])return RC.maps[k].target_value; const hit=pl.find(l=>rcNorm(l)===k); return hit||''; }
-function rcLocMap(){            // normalized FAR location → project location label (saved mappings + exact matches)
-  const pl=rcProjLocs(),m={};rcFarLocGroups().forEach(g=>{const t=rcTarget(g.k,pl);if(t)m[g.k]=t;});return m;
-}
+function rcLocMap(){const pl=rcProjLocs(),m={};rcFarLocGroups().forEach(g=>{const t=rcTarget(g.k,pl);if(t)m[g.k]=t;});return m;}
 function rcRenderMap(){
   const el=document.getElementById('rc-map');
   if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR first.</div>';return;}
-  const pl=rcProjLocs(),gr=rcFarLocGroups();
+  const gr=rcFarLocGroups();
+  if(!gr.length){el.innerHTML='<div style="font-size:12px;color:var(--text2);">✓ This FAR has no location information, so nothing needs mapping. Each matched FAR line is taken to be at the location of the physical capture it matches; unmatched lines have no location.</div>';return;}
+  const pl=rcProjLocs();
   if(!pl.length){el.innerHTML='<div style="font-size:12px;color:var(--text2);">This project has no locations yet. Add them under <b>Locations & Depts</b>, then return here.</div>';return;}
   const mapped=gr.filter(g=>rcTarget(g.k,pl)).length,lines=gr.filter(g=>rcTarget(g.k,pl)).reduce((s,g)=>s+g.n,0);
-  let h=`<div style="font-size:12px;margin-bottom:10px;"><b>${mapped} of ${gr.length}</b> FAR locations mapped (${lines.toLocaleString()} of ${RC.far.length.toLocaleString()} lines). Exact name matches are pre-selected. Unmapped locations can still match captures that use the same name.</div>
+  el.innerHTML=`<div style="font-size:12px;margin-bottom:10px;"><b>${mapped} of ${gr.length}</b> FAR locations mapped (${lines.toLocaleString()} of ${RC.far.length.toLocaleString()} lines). Exact name matches are pre-selected.</div>
   <div style="max-height:360px;overflow:auto;"><table class="tbl"><tr><th>FAR location</th><th>Lines</th><th>Maps to project location</th></tr>`+
-  gr.map((g,i)=>{const lab=Object.entries(g.labels).sort((a,b)=>b[1]-a[1])[0][0],t=rcTarget(g.k,pl);
+  gr.map(g=>{const lab=Object.entries(g.labels).sort((a,b)=>b[1]-a[1])[0][0],t=rcTarget(g.k,pl);
     return `<tr><td>${rcH(lab)}${Object.keys(g.labels).length>1?` <span style="color:var(--text3);font-weight:600;">(+${Object.keys(g.labels).length-1} spelling${Object.keys(g.labels).length>2?'s':''})</span>`:''}</td><td>${g.n}</td>
       <td><select class="fi rc-map-sel" data-k="${rcH(g.k)}" data-lab="${rcH(lab)}" style="padding:7px 10px;"><option value="">— not mapped —</option>${pl.map(l=>`<option value="${rcH(l)}" ${l===t?'selected':''}>${rcH(l)}</option>`).join('')}</select></td></tr>`;}).join('')+`</table></div>
   <button class="btn-p act-btn" style="margin-top:12px;" onclick="rcSaveMap()">💾 Save location mappings</button>`;
-  el.innerHTML=h;
 }
 async function rcSaveMap(){
   const cid=rcCid(),pid=RC.pid,rows=[],del=[];
@@ -4737,42 +4889,58 @@ async function rcSaveMap(){
   }catch(e){toast('Save failed: '+e.message,'err');}
 }
 
-/* ── 3. Location coverage ────────────────────────────────────────── */
+/* ── 3. Exercise / location coverage ─────────────────────────────── */
 function rcCovLocs(){const s=new Set(rcProjLocs());Object.values(RC.maps).forEach(m=>s.add(m.target_value));return [...s].sort((a,b)=>a.localeCompare(b));}
+function rcCovSel(loc,st){return `<select class="fi" style="width:auto;padding:6px 10px;" onchange="rcSetCov('${rcH(esc(loc))}',this.value)">${[['not_started','Not started'],['in_progress','In progress'],['completed','Completed']].map(([v,t])=>`<option value="${v}" ${st===v?'selected':''}>${t}</option>`).join('')}</select>`;}
 function rcRenderCov(){
   const el=document.getElementById('rc-cov');
   if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR first.</div>';return;}
-  const ls=rcCovLocs();if(!ls.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);">No project locations yet.</div>';return;}
-  const st=l=>(RC.cov[rcNorm(l)]||{}).status||'not_started',done=ls.filter(l=>st(l)==='completed').length;
-  el.innerHTML=`<div style="font-size:12px;margin-bottom:10px;"><b>${done} of ${ls.length}</b> locations completed. A FAR line is reported <b>Missing</b> only once its location is Completed; until then it shows as <b>Not yet verified</b>.</div>
-   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">`+ls.map(l=>`<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;border:2px solid var(--border);border-radius:10px;padding:8px 12px;"><span style="font-weight:800;font-size:12px;">${rcH(l)}</span>
-   <select class="fi" style="width:auto;padding:6px 10px;" onchange="rcSetCov('${rcH(esc(l))}',this.value)">${[['not_started','Not started'],['in_progress','In progress'],['completed','Completed']].map(([v,t])=>`<option value="${v}" ${st(l)===v?'selected':''}>${t}</option>`).join('')}</select></div>`).join('')+`</div>`;
+  const st=l=>(RC.cov[rcCovKey(l)]||{}).status||'not_started';
+  let h=`<div style="font-size:12px;margin-bottom:10px;">A FAR line is reported <b>Missing</b> only once its area is marked Completed; until then it is <b>Not yet verified</b>.</div>
+   <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;border:2px solid var(--acc,#0077cc);border-radius:10px;padding:10px 14px;max-width:620px;margin-bottom:12px;">
+     <span style="font-weight:900;font-size:13px;">Whole project <span style="font-weight:600;color:var(--text2);">— applies to every FAR line that has no location</span></span>${rcCovSel('__project__',st('__project__'))}</div>`;
+  const ls=rcFarHasLoc()?rcCovLocs():[];
+  if(ls.length){const done=ls.filter(l=>st(l)==='completed').length;
+    h+=`<div style="font-size:12px;margin:6px 0 8px;"><b>${done} of ${ls.length}</b> locations completed.</div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;">`+
+    ls.map(l=>`<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;border:2px solid var(--border);border-radius:10px;padding:8px 12px;"><span style="font-weight:800;font-size:12px;">${rcH(l)}</span>${rcCovSel(l,st(l))}</div>`).join('')+`</div>`;}
+  el.innerHTML=h;
 }
 async function rcSetCov(loc,status){
   try{await rcInsert('recon_location_coverage',[{company_id:rcCid(),project_id:RC.pid,location:loc,status,updated_by:rcWho(),updated_at:new Date().toISOString()}],1,'project_id,location');
-    RC.cov[rcNorm(loc)]={location:loc,status};rcRenderCov();toast('Location status saved','ok');}
+    RC.cov[rcCovKey(loc)]={location:loc,status};rcRenderCov();toast('Status saved','ok');}
   catch(e){toast('Could not save status: '+e.message,'err');rcRenderCov();}
 }
 
 /* ── 4. Settings (per project, config key recon_settings:<project>) ─ */
 function rcRenderSettings(){
   const s=RC.settings,el=document.getElementById('rc-set');if(!s)return;
+  const act=(id,v)=>`<select class="fi" id="${id}" style="width:auto;padding:5px 9px;"><option value="review" ${v==='review'?'selected':''}>Send to review</option><option value="accept" ${v==='accept'?'selected':''}>Auto-accept</option></select>`;
+  const chk=(id,v)=>`<input type="checkbox" id="${id}" ${v!==false?'checked':''}>`;
   el.innerHTML=`<div class="f3">
-   <div class="fg"><div class="fl">Similar assets in one location — NBV priority</div><select class="fi" id="rc-s-nbv">
+   <div class="fg"><div class="fl">Identical items — NBV priority</div><select class="fi" id="rc-s-nbv">
      <option value="high" ${s.nbv_priority==='high'?'selected':''}>High NBV first (recommended)</option><option value="low" ${s.nbv_priority==='low'?'selected':''}>Low NBV first (conservative)</option><option value="far_order" ${s.nbv_priority==='far_order'?'selected':''}>FAR order</option></select></div>
    <div class="fg"><div class="fl">Captures that count as found</div><select class="fi" id="rc-s-cnt"><option value="approved_pending" ${s.count_mode==='approved_pending'?'selected':''}>Approved + pending (pending flagged)</option><option value="approved_only" ${s.count_mode==='approved_only'?'selected':''}>Approved only</option></select></div>
-   <div class="fg"><div class="fl">Ignore list (junk serials / codes, comma separated)</div><input class="fi" id="rc-s-junk" value="${rcH((s.junk||[]).join(', '))}"></div></div>
-   <div style="font-size:11px;color:var(--text3);margin:2px 0 10px;">Rejected captures never count. Under <b>High NBV first</b> the unmatched leftovers are the lowest-value lines, which minimises the value reported as not seen; <b>Low NBV first</b> is the conservative opposite.</div>
-   <div style="font-size:12px;font-weight:800;margin-bottom:6px;">Matching levels</div>
-   <table class="tbl" style="max-width:640px;"><tr><th>Level</th><th>Criteria</th><th>Status</th></tr>
-   <tr><td>L3</td><td>Description + location (normalised, after mappings)</td><td><span class="badge ba">ACTIVE · auto-accept</span></td></tr>
-   ${[['L1','Client old asset code'],['L2','Serial number'],['L4','Fuzzy description + location'],['L5','Description + department (transfers)'],['L6','Category + location']].map(([a,b])=>`<tr style="opacity:.55"><td>${a}</td><td>${b}</td><td>Phase 2</td></tr>`).join('')}</table>
+   <div class="fg"><div class="fl">Ignore list (junk serials, comma separated)</div><input class="fi" id="rc-s-junk" value="${rcH((s.junk||[]).join(', '))}"></div></div>
+   <div style="font-size:11px;color:var(--text3);margin:2px 0 10px;">Rejected captures never count. Under <b>High NBV first</b>, when a FAR has several identical lines but fewer were found, the unmatched leftovers are the lowest-value lines.</div>
+   <div style="font-size:12px;font-weight:800;margin-bottom:6px;">Matching levels <span style="font-weight:600;color:var(--text3)">(strictest first; each level only works on what earlier levels left unmatched)</span></div>
+   <table class="tbl" style="max-width:760px;"><tr><th>On</th><th>Level</th><th>Criteria</th><th>When it matches</th></tr>
+   <tr><td>${chk('rc-l-id',s.lvl_id)}</td><td>L2</td><td>Serial / registration, chassis or engine number equal</td><td>Auto-accept</td></tr>
+   <tr><td>${chk('rc-l-name',s.lvl_name)}</td><td>L3</td><td>Same description. <b>If the FAR line has a location, the capture must be in that same location</b> (mandatory, applies to every level below too). FAR lines with no location can match a capture anywhere.</td><td>Auto-accept</td></tr>
+   <tr><td>${chk('rc-l-fuzzy',s.lvl_fuzzy)}</td><td>L4</td><td>Similar description, at least <input class="fi" id="rc-s-thr" type="number" min="60" max="99" value="${rcH(s.fuzzy_threshold)}" style="width:62px;display:inline-block;padding:4px 8px;">% alike</td><td>${act('rc-a-fuzzy',s.fuzzy_action)}</td></tr>
+   <tr><td>${chk('rc-l-token',s.lvl_token)}</td><td>L4T</td><td>One description's key words all appear in the other (e.g. "LG 55 Television" within a longer name)</td><td>${act('rc-a-token',s.token_action)}</td></tr>
+   <tr><td>${chk('rc-l-type',s.lvl_type)}</td><td>L5</td><td>Same product type (last word, e.g. Television, Monitor) with compatible category</td><td>${act('rc-a-type',s.type_action)}</td></tr>
+   <tr><td colspan="2" style="text-align:right;">Last</td><td>Item <b>found in a different location</b> than the FAR says, with the same serial/chassis/engine number or exact description (possible transfer)</td><td><select class="fi" id="rc-s-cross" style="width:auto;padding:5px 9px;"><option value="review" ${s.cross_location!=='off'?'selected':''}>Send to review</option><option value="off" ${s.cross_location==='off'?'selected':''}>Off — never</option></select></td></tr></table>
    <button class="btn-p act-btn" style="margin-top:12px;" onclick="rcSaveSettings()">💾 Save settings</button>`;
 }
+function rcReadSettings(){
+  const g=id=>document.getElementById(id);
+  return {nbv_priority:g('rc-s-nbv').value,count_mode:g('rc-s-cnt').value,junk:g('rc-s-junk').value.split(',').map(x=>x.trim()).filter(Boolean),
+    cross_location:g('rc-s-cross').value,fuzzy_threshold:Math.min(99,Math.max(60,parseInt(g('rc-s-thr').value,10)||85)),
+    lvl_id:g('rc-l-id').checked,lvl_name:g('rc-l-name').checked,lvl_fuzzy:g('rc-l-fuzzy').checked,lvl_token:g('rc-l-token').checked,lvl_type:g('rc-l-type').checked,
+    fuzzy_action:g('rc-a-fuzzy').value,token_action:g('rc-a-token').value,type_action:g('rc-a-type').value};
+}
 async function rcSaveSettings(){
-  const s={nbv_priority:document.getElementById('rc-s-nbv').value,count_mode:document.getElementById('rc-s-cnt').value,
-    junk:document.getElementById('rc-s-junk').value.split(',').map(x=>x.trim()).filter(Boolean)};
-  const key='recon_settings:'+RC.pid,cid=rcCid(),val=JSON.stringify(s),ts=new Date().toISOString();
+  const s=rcReadSettings(),key='recon_settings:'+RC.pid,cid=rcCid(),val=JSON.stringify(s),ts=new Date().toISOString();
   try{
     const p=await rcFetch(`config?company_id=eq.${rcQ(cid)}&key=eq.${rcQ(key)}`,{method:'PATCH',headers:{'Prefer':'return=representation'},body:JSON.stringify({value:val,updated_at:ts})});
     if(Array.isArray(p)&&!p.length) await rcFetch('config',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({company_id:cid,key,value:val,updated_at:ts})});
@@ -4785,96 +4953,226 @@ function rcRenderRunCard(){
   const el=document.getElementById('rc-run');
   if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR first.</div>';return;}
   el.innerHTML=`<button class="btn-p act-btn" onclick="rcRun()">▶ Run interim reconciliation</button>
-    <span style="font-size:11px;color:var(--text3);margin-left:10px;">Reads captured assets only — no asset record is ever changed. Every run is saved.</span><div id="rc-summary" style="margin-top:16px;"></div>`;
+    <span style="font-size:11px;color:var(--text3);margin-left:10px;">Uses the saved settings. Reads captured assets only — no asset record is ever changed. Every run is saved.</span><div id="rc-summary" style="margin-top:16px;"></div>`;
   rcRenderSummary();
+}
+function rcPvEnrich(a){
+  const defs=resolveCFFor(a.project_id)||[],cf=_parseCF(a),o={};
+  defs.forEach(d=>{const l=rcNorm(d.label||d.key);if(l.includes('chassis'))o.chassis=cf[d.key];else if(l.includes('engine'))o.engine=cf[d.key];});
+  return {...a,chassis:o.chassis||null,engine:o.engine||null};
 }
 async function rcRun(){
   if(RC.busy||!RC.snap)return;
   const cid=rcCid(),pid=RC.pid;rcBusy(true,'Reading captured assets…');
   try{
-    const assets=await rcAll('assets',`?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&select=id,barcode,name,location,department,custodian,approval_status&order=id.asc`);
+    const assets=await rcAll('assets',`?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,approval_status,custom_fields&order=id.asc`);
     const mode=RC.settings.count_mode;
-    const pv=assets.filter(a=>a.barcode&&a.approval_status!=='rejected'&&(mode!=='approved_only'||a.approval_status==='approved'));
-    const cov={};Object.values(RC.cov).forEach(c=>cov[rcNorm(c.location)]=c.status);
+    const pv=assets.filter(a=>a.barcode&&a.approval_status!=='rejected'&&(mode!=='approved_only'||a.approval_status==='approved')).map(rcPvEnrich);
+    const cov={};Object.values(RC.cov).forEach(c=>cov[rcCovKey(c.location)]=c.status);
     const locMap=rcLocMap();
+    const unm=rcFarLocGroups().filter(g=>!locMap[g.k]&&!assets.some(a=>rcNorm(a.location)===g.k));
+    if(unm.length&&!confirm(`${unm.length} FAR location(s) are not mapped to any project location (e.g. ${Object.keys(unm[0].labels)[0]}). Because location is mandatory, FAR lines in them cannot match any capture. Run anyway?`)){rcBusy(false);return;}
     rcBusy(true,'Reconciling…');
     const out=rcEngine({far:RC.far,pv,locMap,coverage:cov,settings:RC.settings});
     out.summary.pv_excluded_rejected=assets.filter(a=>a.approval_status==='rejected').length;
-    out.summary.pv_without_project=0;
     const runId=rcUuid();rcBusy(true,'Saving run…');
     await rcFetch('recon_runs',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({id:runId,company_id:cid,project_id:pid,snapshot_id:RC.snap.id,run_type:'interim',
-      settings:{settings:RC.settings,location_mappings:locMap,coverage:cov,engine:'phase1-L3'},summary:out.summary,created_by:rcWho()})});
+      settings:{settings:RC.settings,location_mappings:locMap,coverage:cov,engine:'v2'},summary:out.summary,created_by:rcWho()})});
     try{ await rcInsert('recon_results',out.results.map(r=>({...r,id:rcUuid(),run_id:runId,company_id:cid,project_id:pid})),1000); }
-    catch(e){ await rcFetch('recon_runs?id=eq.'+rcQ(runId),{method:'DELETE'}).catch(()=>{}); throw e; }   // no half-saved runs
-    rcBusy(false);toast(`✅ Run saved — ${out.summary.matched.toLocaleString()} matched, ${out.summary.not_seen.toLocaleString()} not seen`,'ok');
+    catch(e){ await rcFetch('recon_runs?id=eq.'+rcQ(runId),{method:'DELETE'}).catch(()=>{}); throw e; }
+    rcBusy(false);toast(`✅ Run saved — ${out.summary.matched.toLocaleString()} matched, ${out.summary.review.toLocaleString()} to review, ${out.summary.not_seen.toLocaleString()} not seen`,'ok');
     RC.runId=runId;RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id&order=created_at.desc`);
-    rcRenderSummary();await rcLoadResults(runId);
+    rcRenderSummary();rcRenderGuide();await rcLoadResults(runId);
   }catch(e){rcBusy(false);toast('Run failed: '+e.message,'err');}
 }
-function rcSelectRun(id){RC.runId=id;RC.page=0;rcRenderSummary();rcLoadResults(id);}
+function rcSelectRun(id){RC.runId=id;RC.page=0;rcRenderSummary();rcRenderGuide();rcLoadResults(id);}
 function rcRenderSummary(){
   const el=document.getElementById('rc-summary');if(!el)return;
-  if(!RC.runs.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);">No runs yet. Set location statuses, then run.</div>';return;}
-  const run=RC.runs.find(r=>r.id===RC.runId)||RC.runs[0],S=run.summary||{};
+  if(!RC.runs.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);">No runs yet. Set the exercise status, then run.</div>';return;}
+  const run=RC.runs.find(r=>r.id===RC.runId)||RC.runs[0],S=run.summary||{},BS=S.by_status||{};
   const k=(l,v,c,sub)=>`<div class="kpi" style="border-color:${c||'var(--border)'}"><div style="font-size:10px;font-weight:900;letter-spacing:.6px;color:var(--text2);text-transform:uppercase;">${l}</div><div style="font-family:var(--fh);font-size:26px;font-weight:900;">${v}</div>${sub?`<div style="font-size:10px;color:var(--text3);">${sub}</div>`:''}</div>`;
   const bar=(a,b)=>b?`<div style="height:8px;background:var(--surf2);border-radius:4px;overflow:hidden;min-width:90px;"><div style="height:100%;width:${Math.min(100,a/b*100)}%;background:var(--acc4);"></div></div>`:'';
-  const tbl=(o,lab)=>`<table class="tbl"><tr><th>${lab}</th><th>FAR lines</th><th>Matched</th><th>Missing</th><th>Not yet verified</th><th>Resolved</th></tr>`+Object.entries(o).sort((a,b)=>b[1].expected-a[1].expected).map(([n,v])=>`<tr><td>${rcH(n)}</td><td>${v.expected}</td><td>${v.matched}</td><td>${v.missing}</td><td>${v.not_yet_verified}</td><td>${bar(v.matched,v.expected)}</td></tr>`).join('')+`</table>`;
+  const tbl=(o,lab,skip)=>{const keys=Object.keys(o||{});if(!keys.length||(keys.length===1&&keys[0]===skip))return '';
+    return `<div style="font-size:12px;font-weight:800;margin:14px 0 6px;">By ${lab.toLowerCase()}</div><div style="max-height:300px;overflow:auto;"><table class="tbl"><tr><th>${lab}</th><th>FAR lines</th><th>Matched</th><th>Probable</th><th>Missing</th><th>Not yet verified</th><th>Resolved</th></tr>`+
+    Object.entries(o).sort((a,b)=>b[1].expected-a[1].expected).map(([n,v])=>`<tr><td>${rcH(n)}</td><td>${v.expected}</td><td>${v.matched}</td><td>${v.review||0}</td><td>${v.missing}</td><td>${v.not_yet_verified}</td><td>${bar(v.matched,v.expected)}</td></tr>`).join('')+`</table></div>`;};
+  const sr=(l,b,showVal)=>b&&b.count?`<tr><td><b>${l}</b></td><td>${rcFmt(b.count)}</td><td>${showVal?rcFmt(b.cost):''}</td><td>${showVal?rcFmt(b.dep):''}</td><td>${showVal?rcFmt(b.nbv):''}</td></tr>`:'';
+  const lv=Object.entries(S.by_level||{}).map(([c,n])=>`${(typeof RC_LEVELS!=='undefined'&&RC_LEVELS[c])||c}: ${n}`).join(' · ');
   el.innerHTML=`<div class="card-ttl" style="font-size:14px;">At a glance <span>run of ${new Date(run.created_at).toLocaleString()} by ${rcH(run.created_by||'—')} (interim)</span></div>
    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:14px;">
-    ${k('FAR lines',rcFmt(S.far_total))}${k('Matched',rcFmt(S.matched),'rgba(0,153,107,.5)',`${S.resolved_pct}% resolved`)}${k('Missing',rcFmt(S.missing),'rgba(192,57,43,.5)','location completed')}
-    ${k('Not yet verified',rcFmt(S.not_yet_verified),'rgba(230,160,0,.5)','location open')}${k('Surplus',rcFmt(S.surplus),'rgba(110,62,196,.5)','captured, not in FAR')}${k('Value not seen (NBV)','₦'+rcFmt(S.nbv_not_seen),'',`missing ₦${rcFmt(S.nbv_missing)}`)}</div>
-   <div style="font-size:11px;color:var(--text2);margin-bottom:12px;">Matched by level: L3 = ${rcFmt(S.by_level&&S.by_level.L3)} · unique ${rcFmt(S.unique)} / group-assigned ${rcFmt(S.group_assigned)} (accurate on count, not on which exact unit) · ${rcFmt(S.pending_matched)} matched on pending captures · NBV priority: ${rcH(S.nbv_priority)}
-   ${S.skipped_far?` · <b>${S.skipped_far}</b> FAR lines lacked description/location`:''}${S.skipped_pv?` · <b>${S.skipped_pv}</b> captures lacked name/location`:''}
-   ${(S.unmapped_locations||[]).length?`<br>⚠ ${S.unmapped_locations.length} FAR location(s) not mapped: ${rcH(S.unmapped_locations.slice(0,8).join(', '))}${S.unmapped_locations.length>8?'…':''}`:''}</div>
-   <div style="font-size:12px;font-weight:800;margin:10px 0 6px;">By location</div><div style="max-height:300px;overflow:auto;">${tbl(S.by_location||{},'Location')}</div>
-   <div style="font-size:12px;font-weight:800;margin:14px 0 6px;">By department</div><div style="max-height:260px;overflow:auto;">${tbl(S.by_department||{},'Department')}</div>
-   <div style="font-size:12px;font-weight:800;margin:14px 0 6px;">Not-seen trend across runs</div>
-   <table class="tbl"><tr><th>Run</th><th>By</th><th>Matched</th><th>Not seen</th><th>NBV not seen</th><th>Resolved</th><th></th></tr>`+
-   RC.runs.map(r=>{const s=r.summary||{};return `<tr style="${r.id===run.id?'background:rgba(0,119,204,.07)':''}"><td>${new Date(r.created_at).toLocaleString()}</td><td>${rcH(r.created_by||'—')}</td><td>${rcFmt(s.matched)}</td><td>${rcFmt(s.not_seen)}</td><td>₦${rcFmt(s.nbv_not_seen)}</td><td>${bar(s.matched,s.far_total)} ${s.resolved_pct}%</td><td><button class="btn-s act-btn" onclick="rcSelectRun('${r.id}')">View</button></td></tr>`;}).join('')+`</table>`;
+    ${k('FAR lines',rcFmt(S.far_total))}${k('Matched',rcFmt(S.matched),'rgba(0,153,107,.5)',`${S.resolved_pct}% resolved`)}${k('Probable',rcFmt(S.review),'rgba(0,119,204,.5)','needs your review')}
+    ${k('Unmatched',rcFmt(S.not_seen),'rgba(192,57,43,.5)',`${rcFmt(S.missing)} missing · ${rcFmt(S.not_yet_verified)} not yet verified`)}${k('Surplus',rcFmt(S.surplus),'rgba(110,62,196,.5)','captured, not in FAR')}${k('Value not seen (NBV)','₦'+rcFmt(S.nbv_not_seen))}</div>
+   <table class="tbl" style="max-width:640px;"><tr><th>Status</th><th>Count</th><th>Acquisition cost</th><th>Depreciation</th><th>NBV</th></tr>
+    ${sr('MATCHED',BS.matched,1)}${sr('PROBABLE (REVIEW)',BS.review,1)}${sr('FAR UNMATCHED',BS.unmatched,1)}${sr('SURPLUS PV',BS.surplus,0)}
+    <tr><td><b>Grand total</b></td><td>${rcFmt((BS.matched&&BS.matched.count||0)+(BS.review&&BS.review.count||0)+(BS.unmatched&&BS.unmatched.count||0)+(BS.surplus&&BS.surplus.count||0))}</td><td></td><td></td><td></td></tr></table>
+   <div style="font-size:11px;color:var(--text2);margin:10px 0;">Matched by level — ${lv||'—'}<br>Unique ${rcFmt(S.unique)} / group-assigned ${rcFmt(S.group_assigned)} (right on count, interchangeable on which unit) · ${rcFmt(S.pending_matched)} matched on pending captures · NBV priority: ${rcH(S.nbv_priority)}
+   ${S.skipped_far?`<br><b>${S.skipped_far}</b> FAR lines have no description (cannot match by name)`:''}${(S.unmapped_locations||[]).length?`<br>⚠ ${S.unmapped_locations.length} FAR location(s) not mapped: ${rcH(S.unmapped_locations.slice(0,8).join(', '))}`:''}</div>
+   ${tbl(S.by_category,'Category','(no category)')}${tbl(S.by_location,'Location','(no location)')}${tbl(S.by_department,'Department','(no department)')}
+   <div style="font-size:12px;font-weight:800;margin:14px 0 6px;">Unmatched trend across runs</div>
+   <table class="tbl"><tr><th>Run</th><th>By</th><th>Matched</th><th>Probable</th><th>Unmatched</th><th>NBV not seen</th><th>Resolved</th><th></th></tr>`+
+   RC.runs.map(r=>{const s=r.summary||{};return `<tr style="${r.id===run.id?'background:rgba(0,119,204,.07)':''}"><td>${new Date(r.created_at).toLocaleString()}</td><td>${rcH(r.created_by||'—')}</td><td>${rcFmt(s.matched)}</td><td>${rcFmt(s.review)}</td><td>${rcFmt(s.not_seen)}</td><td>₦${rcFmt(s.nbv_not_seen)}</td><td>${bar(s.matched,s.far_total)} ${s.resolved_pct}%</td><td><button class="btn-s act-btn" onclick="rcSelectRun('${r.id}')">View</button></td></tr>`;}).join('')+`</table>`;
 }
 
-/* ── 6. Results (side by side) + CSV ─────────────────────────────── */
+/* ── 6. Results (side by side), review decisions, exports ─────────── */
 async function rcLoadResults(runId){
   const box=document.getElementById('rc-res');if(!box)return;box.innerHTML='<div style="font-size:12px;color:var(--text3);">Loading results…</div>';
   try{const rows=await rcAll('recon_results',`?run_id=eq.${rcQ(runId)}&select=*&order=id.asc`);if(RC.runId!==runId)return;RC.results=rows;RC.page=0;rcRenderResults();}
   catch(e){box.innerHTML='<div style="color:#c0392b;font-size:12px;">Could not load results: '+rcH(e.message)+'</div>';}
 }
+function rcFarLoc(r,f){return rcEffLocation(f,r,rcLocMap());}
 function rcFiltered(){
-  const q=rcNorm(RC.q);
+  const q=rcNorm(RC.q),lm=rcLocMap();
   const rows=RC.results.map(r=>({r,f:r.far_record_id?RC.farById[r.far_record_id]:null})).filter(({r,f})=>{
     if(RC.filter!=='all'&&r.outcome!==RC.filter)return false;
     if(!q)return true;
-    return rcNorm([f&&f.asset_code,f&&f.description,f&&f.location,r.barcode,r.pv_name,r.pv_location].join(' ')).includes(q);});
+    return rcNorm([f&&f.asset_code,f&&f.description,f&&f.category,r.barcode,r.pv_name,r.pv_location].join(' ')).includes(q);});
   return rows.sort((a,b)=>((a.f?a.f.row_no:1e9)-(b.f?b.f.row_no:1e9))||String(a.r.barcode).localeCompare(String(b.r.barcode)));
 }
-const RC_OC={matched:['ba','Matched'],missing:['br','Missing'],not_yet_verified:['bm','Not yet verified'],surplus:['bu','Surplus'],review:['bs','Review'],matched_discrepancy:['bm','Discrepancy'],conflict:['br','Conflict']};
+const RC_OC={matched:['ba','Matched'],review:['bs','Probable'],missing:['br','Missing'],not_yet_verified:['bm','Not yet verified'],surplus:['bu','Surplus'],matched_discrepancy:['bm','Discrepancy'],conflict:['br','Conflict']};
 function rcSetFilter(v){RC.filter=v;RC.page=0;rcRenderResults();}
 function rcSetQ(v){RC.q=v;RC.page=0;rcRenderResults();}
 function rcPage(d){RC.page=Math.max(0,RC.page+d);rcRenderResults();}
 function rcRenderResults(){
   const box=document.getElementById('rc-res');if(!box)return;
   const all=rcFiltered(),PS=100,pages=Math.max(1,Math.ceil(all.length/PS));if(RC.page>=pages)RC.page=pages-1;
-  const cnt=o=>RC.results.filter(r=>o==='all'||r.outcome===o).length;
-  const slice=all.slice(RC.page*PS,RC.page*PS+PS);
+  const cnt=o=>RC.results.filter(r=>o==='all'||r.outcome===o).length,lm=rcLocMap();
+  const slice=all.slice(RC.page*PS,RC.page*PS+PS),nrev=cnt('review');
   box.innerHTML=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
-    <select class="fi" style="width:auto;" onchange="rcSetFilter(this.value)">${[['all','All'],['matched','Matched'],['missing','Missing'],['not_yet_verified','Not yet verified'],['surplus','Surplus']].map(([v,t])=>`<option value="${v}" ${RC.filter===v?'selected':''}>${t} (${cnt(v)})</option>`).join('')}</select>
-    <input class="fi" style="width:240px;" placeholder="Search code, description, tag…" value="${rcH(RC.q)}" onchange="rcSetQ(this.value)">
-    <button class="btn-s act-btn" onclick="rcExportCSV()">⬇ Export CSV (${all.length.toLocaleString()} rows)</button></div>
-   <div style="overflow:auto;max-height:520px;"><table class="tbl"><tr><th colspan="4" style="text-align:center;">FAR (client book)</th><th colspan="3" style="text-align:center;">Physical verification</th><th>Outcome</th><th>Level / basis</th></tr>
-   <tr><th>Asset code</th><th>Description</th><th>Location</th><th>NBV</th><th>Tag no</th><th>Description</th><th>Location</th><th></th><th></th></tr>`+
-   slice.map(({r,f})=>{const o=RC_OC[r.outcome]||['bu',r.outcome];return `<tr><td>${rcH(f&&f.asset_code)}</td><td>${rcH(f&&f.description)}</td><td>${rcH(f&&f.location)}</td><td>${f?rcFmt(f.nbv):''}</td>
+    <select class="fi" style="width:auto;" onchange="rcSetFilter(this.value)">${[['all','All'],['matched','Matched'],['review','Probable — needs review'],['missing','Missing'],['not_yet_verified','Not yet verified'],['surplus','Surplus']].map(([v,t])=>`<option value="${v}" ${RC.filter===v?'selected':''}>${t} (${cnt(v)})</option>`).join('')}</select>
+    <input class="fi" style="width:220px;" placeholder="Search code, description, tag…" value="${rcH(RC.q)}" onchange="rcSetQ(this.value)">
+    ${nrev?`<button class="btn-p act-btn" onclick="rcAcceptAll()">✔ Accept all ${nrev} probable</button>`:''}
+    <button class="btn-s act-btn" onclick="rcExportCSV()">⬇ CSV</button>
+    <button class="btn-p act-btn" onclick="rcExportXLSX()">⬇ Excel report (client format)</button></div>
+   <div style="overflow:auto;max-height:540px;"><table class="tbl"><tr><th colspan="4" style="text-align:center;">FAR (client book)</th><th colspan="3" style="text-align:center;">Physical verification</th><th>Outcome</th><th>How matched</th><th></th></tr>
+   <tr><th>Asset code</th><th>Description</th><th>Location*</th><th>NBV</th><th>Tag no</th><th>Description</th><th>Location</th><th></th><th></th><th></th></tr>`+
+   slice.map(({r,f})=>{const o=RC_OC[r.outcome]||['bu',r.outcome];
+     return `<tr><td>${rcH(f&&f.asset_code)}</td><td>${rcH(f&&f.description)}</td><td>${rcH(f?rcEffLocation(f,r,lm):'')}</td><td>${f?rcFmt(f.nbv):''}</td>
      <td>${rcH(r.barcode)}${r.pv_approval&&r.pv_approval!=='approved'&&r.barcode?' <span title="capture not yet approved" style="color:#b9770e;">●</span>':''}</td><td>${rcH(r.pv_name)}</td><td>${rcH(r.pv_location)}</td>
-     <td><span class="badge ${o[0]}">${o[1]}</span></td><td>${r.level?rcH(r.level)+' · '+(r.basis==='unique'?'Unique':'Group-assigned'):''}</td></tr>`;}).join('')+`</table></div>
+     <td><span class="badge ${o[0]}">${o[1]}</span></td><td>${r.level?rcH((RC_LEVELS[r.level]||r.level)+' · '+(r.confidence!=null?Math.round(r.confidence)+'%':'')+(r.basis==='group_assigned'?' · group':''))+(r.discrepancies&&r.discrepancies.location?'<div style="color:#b9770e;font-size:10px;font-weight:800;">⚠ location differs: FAR '+rcH(r.discrepancies.location.far)+' · found in '+rcH(r.discrepancies.location.pv||'?')+'</div>':''):''}</td>
+     <td>${r.outcome==='review'?`<button class="btn-s act-btn" title="Accept pairing" onclick="rcDecide('${r.id}','accept')">✔</button> <button class="btn-s act-btn" title="Reject pairing" onclick="rcDecide('${r.id}','reject')">✖</button>`:''}</td></tr>`;}).join('')+`</table></div>
+   <div style="font-size:10px;color:var(--text3);margin-top:4px;">*Location: the FAR's own where it has one; otherwise taken from the matched physical capture.</div>
    <div style="display:flex;gap:10px;align-items:center;margin-top:10px;font-size:12px;"><button class="btn-s act-btn" onclick="rcPage(-1)" ${RC.page?'':'disabled'}>‹ Prev</button>Page ${RC.page+1} of ${pages}<button class="btn-s act-btn" onclick="rcPage(1)" ${RC.page<pages-1?'':'disabled'}>Next ›</button></div>`;
 }
+function rcCoveredDone(f){const lm=rcLocMap(),loc=f&&f.location?(lm[rcNorm(f.location)]||f.location):'';const c=loc?RC.cov[rcCovKey(loc)]:RC.cov['__project__'];return !!(c&&c.status==='completed');}
+async function rcSaveSummary(){
+  const run=RC.runs.find(r=>r.id===RC.runId);if(!run)return;
+  const S={...(run.summary||{}),...rcSummarize(RC.far,RC.results,{locMap:rcLocMap(),prio:(run.summary||{}).nbv_priority})};
+  await rcFetch('recon_runs?id=eq.'+rcQ(run.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({summary:S})});
+  run.summary=S;
+}
+async function rcDecide(id,decision){
+  const r=RC.results.find(x=>x.id===id);if(!r||r.outcome!=='review'||RC.busy)return;
+  const prev={...r},ts={reviewer:rcWho()};
+  try{
+    if(decision==='accept'){
+      const oc=r.discrepancies?'matched_discrepancy':'matched';
+      await rcFetch('recon_results?id=eq.'+rcQ(id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({outcome:oc,review_status:'accepted',...ts})});
+      r.outcome=oc;r.review_status='accepted';
+    }else{
+      const f=RC.farById[r.far_record_id],oc=rcCoveredDone(f)?'missing':'not_yet_verified';
+      await rcFetch('recon_results?id=eq.'+rcQ(id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({outcome:oc,barcode:null,level:null,basis:null,confidence:null,pv_name:null,pv_location:null,pv_department:null,pv_custodian:null,pv_approval:null,review_status:'rejected',...ts})});
+      const sur={id:rcUuid(),run_id:RC.runId,company_id:rcCid(),project_id:RC.pid,far_record_id:null,barcode:prev.barcode,outcome:'surplus',pv_name:prev.pv_name,pv_location:prev.pv_location,pv_department:prev.pv_department,pv_custodian:prev.pv_custodian,pv_approval:prev.pv_approval,review_status:'pairing rejected',...ts};
+      try{await rcFetch('recon_results',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify(sur)});}
+      catch(e){await rcFetch('recon_results?id=eq.'+rcQ(id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({outcome:'review',barcode:prev.barcode,level:prev.level,basis:prev.basis,confidence:prev.confidence,pv_name:prev.pv_name,pv_location:prev.pv_location,pv_department:prev.pv_department,pv_custodian:prev.pv_custodian,pv_approval:prev.pv_approval,review_status:null})}).catch(()=>{});throw e;}
+      Object.assign(r,{outcome:oc,barcode:null,level:null,basis:null,confidence:null,pv_name:null,pv_location:null,pv_department:null,pv_custodian:null,pv_approval:null,review_status:'rejected'});
+      RC.results.push(sur);
+    }
+    await rcSaveSummary();rcRenderSummary();rcRenderResults();
+  }catch(e){toast('Decision not saved: '+e.message,'err');}
+}
+async function rcAcceptAll(){
+  const n=RC.results.filter(r=>r.outcome==='review').length;if(!n||RC.busy)return;
+  if(!confirm(`Accept all ${n} probable pairings as matched${RC.results.some(r=>r.outcome==='review'&&r.discrepancies)?' (including items found in a different location)':''}?`))return;
+  try{
+    const base=`recon_results?run_id=eq.${rcQ(RC.runId)}&outcome=eq.review`,hd={'Prefer':'return=minimal'};
+    await rcFetch(base+'&discrepancies=is.null',{method:'PATCH',headers:hd,body:JSON.stringify({outcome:'matched',review_status:'accepted',reviewer:rcWho()})});
+    await rcFetch(base+'&discrepancies=not.is.null',{method:'PATCH',headers:hd,body:JSON.stringify({outcome:'matched_discrepancy',review_status:'accepted',reviewer:rcWho()})});
+    RC.results.forEach(r=>{if(r.outcome==='review'){r.outcome=r.discrepancies?'matched_discrepancy':'matched';r.review_status='accepted';}});
+    await rcSaveSummary();rcRenderSummary();rcRenderResults();toast(`✅ ${n} pairings accepted`,'ok');
+  }catch(e){toast('Not saved: '+e.message,'err');}
+}
+function rcStamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
 function rcExportCSV(){
-  const rows=rcFiltered(),cell=v=>{if(v==null)return '';let s=String(v);if(/^[=+\-@\t\r]/.test(s)&&isNaN(Number(s)))s="'"+s;return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
-  const hdr=['FAR Asset Code','FAR Description','FAR Category','FAR Location','FAR Department','FAR Custodian','FAR Serial','FAR NBV','FAR Cost','FAR Acquisition Date','PV Tag No','PV Description','PV Location','PV Department','PV Custodian','PV Approval','Outcome','Level','Basis','Confidence'];
+  const rows=rcFiltered(),lm=rcLocMap(),cell=v=>{if(v==null)return '';let s=String(v);if(/^[=+\-@\t\r]/.test(s)&&isNaN(Number(s)))s="'"+s;return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const hdr=['FAR Asset Code','FAR Description','FAR Category','FAR Location','FAR Department','FAR Serial','FAR NBV','FAR Cost','FAR Acquisition Date','PV Tag No','PV Description','PV Location','PV Department','PV Custodian','PV Approval','Outcome','Level','Basis','Confidence'];
   const lines=[hdr.join(',')];
-  rows.forEach(({r,f})=>lines.push([f&&f.asset_code,f&&f.description,f&&f.category,f&&f.location,f&&f.department,f&&f.custodian,f&&f.serial,f&&f.nbv,f&&f.cost,f&&f.acquisition_date,r.barcode,r.pv_name,r.pv_location,r.pv_department,r.pv_custodian,r.pv_approval,(RC_OC[r.outcome]||[0,r.outcome])[1],r.level,r.basis,r.confidence].map(cell).join(',')));
-  const d=new Date(),p=n=>String(n).padStart(2,'0'),ts=`${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  rows.forEach(({r,f})=>lines.push([f&&f.asset_code,f&&f.description,f&&f.category,f?rcEffLocation(f,r,lm):'',f&&f.department,f&&f.serial,f&&f.nbv,f&&f.cost,f&&f.acquisition_date,r.barcode,r.pv_name,r.pv_location,r.pv_department,r.pv_custodian,r.pv_approval,(RC_OC[r.outcome]||[0,r.outcome])[1],r.level,r.basis,r.confidence].map(cell).join(',')));
   const pn=((rcProj()||{}).name||'project').replace(/[^a-z0-9]+/gi,'_');
-  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));a.download=`FAR_Recon_${pn}_${ts}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));a.download=`FAR_Recon_${pn}_${rcStamp()}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+/* Client report: SUMMARY / FAR / MATCHED / FAR UNMATCHED / SURPLUS PV, same layout the clients already receive */
+async function rcExportXLSX(){
+  if(RC.busy||!RC.runId)return;rcBusy(true,'Building Excel report…');
+  try{
+    const assets=await rcAll('assets',`?company_id=eq.${rcQ(rcCid())}&project_id=eq.${rcQ(RC.pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,condition,status,approval_status,custom_fields&order=id.asc`);
+    const byBc=new Map(assets.map(a=>[String(a.barcode),a])),cfLabels=[];
+    const cfOf=a=>{const defs=resolveCFFor(a.project_id)||[],cf=_parseCF(a),o={};defs.forEach(d=>{const l=d.label||d.key;if(!cfLabels.includes(l))cfLabels.push(l);o[l]=cf[d.key];});return o;};
+    const pvInfo=new Map();assets.forEach(a=>pvInfo.set(String(a.barcode),cfOf(a)));
+    const lm=rcLocMap(),run=RC.runs.find(r=>r.id===RC.runId)||{},S=run.summary||{},BS=S.by_status||{};
+    const STAT={matched:'MATCHED',review:'PROBABLE (REVIEW)',missing:'FAR UNMATCHED',not_yet_verified:'NOT YET VERIFIED',surplus:'SURPLUS PV',matched_discrepancy:'MATCHED'};
+    const farH=['FAR_Class','FAR_Fixed Asset Number','FAR_Fixed Asset Number 2','FAR_Fixed Asset Category','FAR_Name','FAR_Product Name','FAR_Serial/Reg No','FAR_Engine No','FAR_Chassis No','FAR_Acquisition Date','FAR_Total Acquisition','FAR_Total Depreciation','FAR_NBV','FAR_Location (from PV where FAR has none)'];
+    const pvH=['PV_Barcode','PV_Product Name','PV_Asset Category','PV_Asset Type','PV_Location Name','PV_Department','PV_Custodian','PV_Serial/Reg Number','PV_Condition','PV_Approval Status',...cfLabels.map(l=>'PV_'+l)];
+    const farRow=(f,r)=>f?[f.asset_class,f.asset_code,f.asset_code2,f.category,f.alt_description,f.description,f.serial,f.engine,f.chassis,f.acquisition_date,f.cost,f.depreciation,f.nbv,rcEffLocation(f,r,lm)]:farH.map(()=>'');
+    const pvRow=r=>{if(!r.barcode)return pvH.map((_,i)=>(i===0&&r.far_record_id)?'NA':'');
+      const a=byBc.get(String(r.barcode)),cf=pvInfo.get(String(r.barcode))||{};
+      return [r.barcode,r.pv_name,a&&a.category,a&&a.sub_category,r.pv_location,r.pv_department,r.pv_custodian,a&&a.serial,a&&a.condition,r.pv_approval,...cfLabels.map(l=>cf[l])];};
+    const recs=RC.results.map(r=>({r,f:r.far_record_id?RC.farById[r.far_record_id]:null}));
+    const farLines=recs.filter(x=>x.f).sort((a,b)=>a.f.row_no-b.f.row_no),surplus=recs.filter(x=>!x.f).sort((a,b)=>String(a.r.barcode).localeCompare(String(b.r.barcode),'en',{numeric:true}));
+    const sheet=(list,withStatus)=>{const hdr=['S/No',...farH,'RECON STATUS',...pvH];const rows=[hdr];list.forEach((x,i)=>rows.push([i+1,...farRow(x.f,x.r),STAT[x.r.outcome]||x.r.outcome,...pvRow(x.r)]));return rows;};
+    const mk=rows=>{const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=rows[0].map((h,i)=>({wch:Math.min(40,Math.max(10,...rows.slice(0,200).map(r=>String(r[i]==null?'':r[i]).length)))}));ws['!freeze']={xSplit:0,ySplit:1};return ws;};
+    const wb=XLSX.utils.book_new(),nr=(b,k)=>b&&b[k]!==undefined?b[k]:0;
+    const sumRows=[['Row Labels','Count of RECON STATUS','Sum of FAR_Total Acquisition','Sum of FAR_Total Depreciation','Sum of FAR_NBV']];
+    const addS=(l,b,v)=>{if(b&&b.count)sumRows.push([l,b.count,v?b.cost:'',v?b.dep:'',v?b.nbv:'']);};
+    addS('MATCHED',BS.matched,1);addS('PROBABLE (REVIEW)',BS.review,1);
+    const um=recs.filter(x=>x.r.outcome==='missing'),ny=recs.filter(x=>x.r.outcome==='not_yet_verified'),sm=l=>l.reduce((a,x)=>[a[0]+(x.f.cost||0),a[1]+(x.f.depreciation||0),a[2]+(x.f.nbv||0)],[0,0,0]);
+    if(um.length)sumRows.push(['FAR UNMATCHED',um.length,...sm(um)]);if(ny.length)sumRows.push(['NOT YET VERIFIED',ny.length,...sm(ny)]);
+    addS('SURPLUS PV',BS.surplus,0);
+    sumRows.push(['Grand Total',recs.length,'','','']);
+    sumRows.push([]);sumRows.push(['Project',(rcProj()||{}).name||'']);sumRows.push(['FAR snapshot',(RC.snap||{}).name||'']);sumRows.push(['Run (interim)',new Date(run.created_at).toLocaleString()]);
+    wb.SheetNames.push('SUMMARY');wb.Sheets.SUMMARY=mk(sumRows);
+    const add=(name,list)=>{wb.SheetNames.push(name);wb.Sheets[name]=mk(sheet(list));};
+    add('FAR',[...farLines,...surplus]);
+    add('MATCHED',farLines.filter(x=>x.r.outcome==='matched'||x.r.outcome==='matched_discrepancy'));
+    if(recs.some(x=>x.r.outcome==='review'))add('PROBABLE (REVIEW)',farLines.filter(x=>x.r.outcome==='review'));
+    add('FAR UNMATCHED',farLines.filter(x=>x.r.outcome==='missing'||x.r.outcome==='not_yet_verified'));
+    add('SURPLUS PV',surplus);
+    const pn=((rcProj()||{}).name||'project').replace(/[^a-z0-9]+/gi,'_');
+    XLSX.writeFile(wb,`FAR_Reconciliation_${pn}_${rcStamp()}.xlsx`);
+    rcBusy(false);toast('✅ Excel report downloaded','ok');
+  }catch(e){rcBusy(false);toast('Export failed: '+e.message,'err');}
+}
+
+/* ── 7. Field Guide: publish a value-free summary for field officers ─ */
+function rcRenderGuide(){
+  const el=document.getElementById('rc-guide');if(!el)return;
+  if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR and run a reconciliation first.</div>';return;}
+  const g=RC.guide,run=RC.runs.find(r=>r.id===RC.runId);
+  let h=`<div style="font-size:12px;color:var(--text2);margin-bottom:10px;">Publishes a simple <b>Guide</b> tab in the Field App for this project: for each location, category and product, how many the FAR expects and how many have been seen, plus a 🆕 alert for recently purchased items not yet seen. It never includes NBV, cost or serial numbers.</div>`;
+  if(g)h+=`<div style="padding:10px 14px;border:2px solid var(--border);border-radius:10px;background:var(--surf2);margin-bottom:12px;font-size:12px;"><b>📣 Published</b> ${new Date(g.published_at).toLocaleString()} by ${rcH(g.published_by||'—')} — ${rcFmt(g.seen)} of ${rcFmt(g.expected)} seen · ${rcFmt(g.recent_total)} recent unseen · "recent" = within ${rcFmt(g.recent_days)} days of the FAR's latest purchase date</div>`;
+  else h+=`<div style="font-size:12px;margin-bottom:10px;color:var(--text3);">Not published — field officers do not see a Guide tab for this project.</div>`;
+  if(!run){h+='<div style="font-size:12px;color:var(--text3);">Run a reconciliation first (step 6).</div>';el.innerHTML=h;return;}
+  h+=`<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;"><div class="fg" style="margin:0;"><div class="fl">Treat as "recently purchased" (days)</div><input class="fi" id="rc-g-days" type="number" min="7" max="1500" value="${rcH((g&&g.recent_days)||RC.settings.recent_days||180)}" style="width:150px;"></div>
+   <button class="btn-p act-btn" onclick="rcPublishGuide()">📣 ${g?'Republish':'Publish'} from the run of ${new Date(run.created_at).toLocaleString()}</button>
+   ${g?'<button class="btn-s act-btn" onclick="rcUnpublishGuide()">Unpublish</button>':''}</div>
+   <div style="font-size:11px;color:var(--text3);margin-top:8px;">Field officers see the counts as of the run you publish. Re-run and republish as captures are approved; accepting probable pairings also changes the counts.</div>`;
+  el.innerHTML=h;
+}
+async function rcPublishGuide(){
+  if(RC.busy||!RC.runId||!RC.results.length){toast('Open a saved run first','err');return;}
+  const days=Math.min(1500,Math.max(7,parseInt(document.getElementById('rc-g-days').value,10)||180));
+  const data=rcBuildGuide(RC.far,RC.results,{locMap:rcLocMap(),recentDays:days});
+  if(JSON.stringify(data).length>4e6){toast('Guide too large to publish','err');return;}
+  rcBusy(true,'Publishing field guide…');
+  try{
+    await rcFetch('recon_field_guide?on_conflict=project_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify({company_id:rcCid(),project_id:RC.pid,snapshot_id:RC.snap.id,run_id:RC.runId,data,published_by:rcWho(),published_at:new Date().toISOString()})});
+    RC.guide={run_id:RC.runId,published_by:rcWho(),published_at:new Date().toISOString(),recent_days:days,expected:data.expected,seen:data.seen,recent_total:data.recent_total};
+    rcBusy(false);rcRenderGuide();toast(`✅ Field Guide published — ${data.seen} of ${data.expected} seen, ${data.recent_total} recent unseen`,'ok');
+  }catch(e){rcBusy(false);toast('Not published: '+e.message,'err');}
+}
+async function rcUnpublishGuide(){
+  if(!confirm('Remove the Guide tab for field officers on this project?'))return;
+  try{await rcFetch(`recon_field_guide?project_id=eq.${rcQ(RC.pid)}&company_id=eq.${rcQ(rcCid())}`,{method:'DELETE'});RC.guide=null;rcRenderGuide();toast('Guide unpublished','ok');}
+  catch(e){toast('Could not unpublish: '+e.message,'err');}
 }
 /* ══ END FAR RECONCILIATION MODULE ═══════════════════════════════ */
 
