@@ -449,11 +449,15 @@ video#scanvid{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
 @media(max-width:380px){.f3{grid-template-columns:1fr 1fr;}}
 /* Project Guide */
 .bnav.five .nb{padding:7px 7px;}
-.gd-sum{margin:14px 20px 0;background:var(--surf);border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;}
+.gd-sum{margin:10px 20px 0;background:var(--surf);border:2px solid var(--border);border-radius:var(--r);padding:14px 16px;}
 .gd-big{font-family:var(--fh);font-size:30px;font-weight:900;color:var(--text);line-height:1.1;}
 .gd-big span{font-size:14px;font-weight:800;color:var(--text2);}
-.gd-bar{height:12px;background:var(--surf2);border-radius:8px;overflow:hidden;margin:10px 0 6px;}
-.gd-bar i{display:block;height:100%;background:var(--g-teal);border-radius:8px;transition:width .3s;}
+.gd-bar{height:12px;background:var(--surf2);border-radius:8px;overflow:hidden;margin:10px 0 6px;display:flex;}
+.gd-bar i{display:block;height:100%;background:var(--g-teal);transition:width .3s;}
+.gd-bar i.lk{background:var(--acc2);opacity:.65;}
+.gd-mode{margin:14px 20px 0;padding:8px 12px;border-radius:10px;font-size:11.5px;font-weight:700;color:var(--text);}
+.gd-mode.est{background:var(--surf2);border:2px dashed var(--border);}
+.gd-mode.off{background:rgba(0,153,107,.12);border:2px solid var(--acc4);}
 .gd-bar.sm{height:7px;margin:7px 0 4px;}
 .gd-sub{font-size:12px;color:var(--text2);font-weight:700;}
 .gd-link{background:none;border:none;color:var(--acc);font-weight:900;font-family:var(--fh);cursor:pointer;padding:0 0 0 6px;font-size:12px;}
@@ -2066,22 +2070,268 @@ function onSubcat(){
 // NAVIGATION
 // ══════════════════════════════════════════════════════
 // ── Project Guide (FAR reconciliation, field view) ──
+/* ── RC ENGINE v2 (pure; no DOM, no network) ──────────────────────────
+   Levels, strictest first (each works only on what is still unmatched):
+     L2-serial / L2-chassis / L2-engine  identifier equal on both sides      → auto-accept
+     L3   exact normalised name + location (only if the FAR has locations)  → auto-accept
+     L3N  exact normalised name, any location (auto-on when FAR has no loc)  → auto-accept
+     L4   fuzzy name (bigram Dice ≥ threshold)                               → review (configurable)
+     L4T  token containment (e.g. "LG 55 Television" ⊂ "LG 55 Nano … Television") → review (configurable)
+     L5   same product type (last word of the name) + compatible category     → review (configurable)
+   LOCATION RULE: if a FAR line has a location it can only match captures in that same location (all levels above).
+   Leftover located lines may then match captures in ANOTHER location (X-levels: identifier or exact name) — review only.
+   Always one-to-one. Deterministic: same inputs + settings → same result.
+   Location rule: when the FAR carries no location, a matched/probable FAR line is
+   taken to be at the location of the physical capture it matched.            */
+const RC_STOP=new Set(['and','the','of','for','with','a','an','in','on','to','set']);
+function rcNorm(s){
+  if(s==null) return '';
+  return String(s).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase()
+    .replace(/&/g,' and ').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function rcIdNorm(v,junk){
+  if(v==null) return '';
+  const s=String(v).toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(s.length<5) return '';
+  if(junk&&junk.has(rcNorm(v))) return '';
+  if(/^(.)\1+$/.test(s)) return '';
+  return s;
+}
+function rcTokens(s){ return [...new Set(rcNorm(s).split(' ').filter(t=>t&&!RC_STOP.has(t)))]; }
+function rcDice(a,b){
+  if(!a||!b) return 0; if(a===b) return 1; if(a.length<2||b.length<2) return 0;
+  const m=new Map(); for(let i=0;i<a.length-1;i++){const g=a.substr(i,2); m.set(g,(m.get(g)||0)+1);}
+  let hit=0; for(let i=0;i<b.length-1;i++){const g=b.substr(i,2),c=m.get(g); if(c>0){hit++; m.set(g,c-1);}}
+  return 2*hit/(a.length+b.length-2);
+}
+function rcCmpNum(a,b,dir){
+  const an=(a==null||isNaN(a)), bn=(b==null||isNaN(b));
+  if(an&&bn) return 0; if(an) return 1; if(bn) return -1;
+  return dir==='asc' ? a-b : b-a;
+}
+function rcCmpDate(a,b){ if(!a&&!b) return 0; if(!a) return 1; if(!b) return -1; return a<b?-1:a>b?1:0; }
+function rcCmpStr(a,b){ return String(a).localeCompare(String(b),'en',{numeric:true}); }
+
+const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
+
+function rcEngine(inp){
+  const far=inp.far||[], pv=inp.pv||[], locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
+  const prio=st.nbv_priority||'high', thr=(st.fuzzy_threshold>0?st.fuzzy_threshold:85)/100;
+  const junk=new Set((st.junk||[]).map(rcNorm));
+  const act=k=>(st[k]==='accept'?'matched':'review');
+  const locKey=raw=>{ const k=rcNorm(raw); if(!k) return ''; const m=locMap[k]; return rcNorm(m||raw); };
+
+  const farP=far.map(r=>({r, fam:rcNorm(String(r.category||'').split(/[-\/]/)[0]), head:(rcNorm(r.description).split(' ').pop()||''), lk:locKey(r.location), dk:rcNorm(r.description), tok:rcTokens(r.description),
+    ids:{serial:rcIdNorm(r.serial,junk), chassis:rcIdNorm(r.chassis,junk), engine:rcIdNorm(r.engine,junk)}}));
+  const pvP=pv.map(a=>({a, cat:rcNorm((a.category||'')+' '+(a.sub_category||'')), lk:rcNorm(a.location), dk:rcNorm(a.name), tok:rcTokens(a.name),
+    ids:{serial:rcIdNorm(a.serial,junk), chassis:rcIdNorm(a.chassis,junk), engine:rcIdNorm(a.engine,junk)}}));
+  pvP.forEach(x=>{x.head=(x.dk.split(' ').pop()||'');});
+  const farHasLoc=farP.length>0 && farP.filter(x=>x.lk).length/farP.length>=0.5;
+  const nameOnly=st.name_only==='on' || (st.name_only!=='off' && !farHasLoc);
+
+  const farCmp=(p,q)=>{
+    let c=0;
+    if(prio==='high') c=rcCmpNum(p.r.nbv,q.r.nbv,'desc'); else if(prio==='low') c=rcCmpNum(p.r.nbv,q.r.nbv,'asc');
+    if(c) return c;
+    if(prio!=='far_order'){ c=rcCmpDate(p.r.acquisition_date,q.r.acquisition_date); if(c) return c; }
+    return (p.r.row_no||0)-(q.r.row_no||0) || rcCmpStr(p.r.id,q.r.id);
+  };
+  const pvCmp=(p,q)=>rcCmpStr(p.a.barcode,q.a.barcode);
+  [...farP].sort(farCmp).forEach((x,i)=>{x.rank=i;});
+
+  let unF=farP.slice(), unP=pvP.slice();
+  const M=[];
+  const take=(f,p,level,basis,conf,outcome)=>{ f.done=true; p.done=true; M.push({f,p,level,basis,conf,outcome}); };
+  const sweep=()=>{ unF=unF.filter(x=>!x.done); unP=unP.filter(x=>!x.done); };
+
+  // LOCATION RULE: a FAR line that has a location may only match captures in that same location.
+  //   scope 'loc'   = FAR lines with a location, PV in the same location (mandatory gate)
+  //   scope 'free'  = FAR lines without a location, PV anywhere
+  //   scope 'cross' = leftover located FAR lines vs PV in ANOTHER location → review only, flagged
+  const inScope=(f,scope)=>scope==='free'?!f.lk:!!f.lk;
+  const gateOK=(f,p,scope)=>scope==='loc'?(p.lk===f.lk):true;
+  const kPre=(x,scope)=>scope==='loc'?x.lk+'##':'';
+  const exactLevel=(level,keyF,keyP,outcome,scope)=>{
+    const fg=new Map(), pg=new Map();
+    unF.forEach(x=>{ if(!inScope(x,scope)) return; const b=keyF(x); if(b) { const k=kPre(x,scope)+b; (fg.get(k)||fg.set(k,[]).get(k)).push(x);} });
+    // a capture with a blank location never matches a located FAR line
+    unP.forEach(x=>{ if((scope==='loc'||scope==='cross')&&!x.lk) return; const b=keyP(x); if(b){ const k=kPre(x,scope)+b; (pg.get(k)||pg.set(k,[]).get(k)).push(x);} });
+    [...fg.keys()].filter(k=>pg.has(k)).sort().forEach(k=>{
+      const F=fg.get(k).sort(farCmp), P=pg.get(k).sort(pvCmp);
+      const basis=(F.length===1&&P.length===1)?'unique':'group_assigned';
+      for(let i=0;i<Math.min(F.length,P.length);i++) take(F[i],P[i],level,basis,100,outcome);
+    });
+    sweep();
+  };
+  const scoredLevel=(level,scoreFn,outcome,scope)=>{
+    if(!unF.length||!unP.length) return;
+    const df=new Map(); unP.forEach(p=>p.tok.forEach(t=>df.set(t,(df.get(t)||0)+1)));
+    const maxDf=Math.max(60,Math.ceil(unP.length*0.05)), idx=new Map();
+    unP.forEach(p=>p.tok.forEach(t=>{ if(df.get(t)<=maxDf) (idx.get(t)||idx.set(t,[]).get(t)).push(p); }));
+    const pairs=[];
+    unF.forEach(f=>{
+      if(!inScope(f,scope)) return;
+      const seen=new Set();
+      f.tok.forEach(t=>(idx.get(t)||[]).forEach(p=>{
+        if(seen.has(p)||!gateOK(f,p,scope)) return; seen.add(p);
+        const s=scoreFn(f,p); if(s>0) pairs.push({f,p,s});
+      }));
+    });
+    pairs.sort((a,b)=>b.s-a.s || a.f.rank-b.f.rank || pvCmp(a.p,b.p));
+    pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,level,'unique',Math.round(c.s*100),outcome); });
+    sweep();
+  };
+  const typeLevel=(outcome,scope)=>{
+    const pg=new Map(); unP.slice().sort(pvCmp).forEach(p=>{ if(p.head.length>2) (pg.get(p.head)||pg.set(p.head,[]).get(p.head)).push(p); });
+    unF.slice().sort(farCmp).forEach(f=>{
+      if(!inScope(f,scope)||f.head.length<=2) return;
+      const g=pg.get(f.head); if(!g) return;
+      const p=g.find(p=>!p.done && gateOK(f,p,scope) && (!f.fam || p.cat.includes(f.fam)));
+      if(p) take(f,p,'L5','unique',60,outcome);
+    });
+    sweep();
+  };
+  const tokFn=(f,p)=>{
+    const A=f.tok,B=p.tok; if(Math.min(A.length,B.length)<2) return 0;
+    const [S,L]=A.length<=B.length?[A,B]:[B,A], set=new Set(L);
+    if(!S.every(t=>set.has(t))) return 0;
+    const sc=S.length/L.length; return sc>=0.5?sc:0;
+  };
+  const diceFn=(f,p)=>{ const s=rcDice(f.dk,p.dk); return s>=thr?s:0; };
+
+  ['loc','free'].forEach(scope=>{
+    if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('L2-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'matched', scope));
+    if(st.lvl_name!==false) exactLevel(scope==='loc'?'L3':'L3N', x=>x.dk, x=>x.dk, 'matched', scope);
+    if(st.lvl_fuzzy!==false) scoredLevel('L4', diceFn, act('fuzzy_action'), scope);
+    if(st.lvl_token!==false) scoredLevel('L4T', tokFn, act('token_action'), scope);
+    if(st.lvl_type!==false) typeLevel(act('type_action'), scope);
+  });
+  if(st.cross_location!=='off'){        // found in a different location than the FAR says → always human-reviewed
+    if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('X-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'review', 'cross'));
+    if(st.lvl_name!==false) exactLevel('X-name', x=>x.dk, x=>x.dk, 'review', 'cross');
+  }
+
+  const byFar=new Map(M.map(m=>[m.f.r.id,m]));
+  const results=[];
+  farP.slice().sort((p,q)=>(p.r.row_no||0)-(q.r.row_no||0)||rcCmpStr(p.r.id,q.r.id)).forEach(x=>{
+    const m=byFar.get(x.r.id);
+    if(m){
+      results.push({far_record_id:x.r.id, barcode:m.p.a.barcode, outcome:m.outcome, level:m.level, basis:m.basis, confidence:m.conf,
+        pv_name:m.p.a.name||null, pv_location:m.p.a.location||null, pv_department:m.p.a.department||null,
+        pv_custodian:m.p.a.custodian||null, pv_approval:m.p.a.approval_status||'pending',
+        discrepancies:(x.lk&&m.p.lk!==x.lk)?{location:{far:locMap[rcNorm(x.r.location)]||x.r.location,pv:m.p.a.location||''}}:null});
+    } else {
+      const done = x.lk ? cov[x.lk]==='completed' : cov['__project__']==='completed';
+      results.push({far_record_id:x.r.id, barcode:null, outcome:done?'missing':'not_yet_verified', level:null, basis:null, confidence:null,
+        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null});
+    }
+  });
+  pvP.filter(x=>!x.done).sort(pvCmp).forEach(x=>results.push({far_record_id:null, barcode:x.a.barcode, outcome:'surplus', level:null, basis:null, confidence:null,
+    pv_name:x.a.name||null, pv_location:x.a.location||null, pv_department:x.a.department||null,
+    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending'}));
+
+  const summary=rcSummarize(far,results,{locMap,prio});
+  summary.skipped_far=farP.filter(x=>!x.dk).length; summary.skipped_pv=pvP.filter(x=>!x.dk).length;
+  summary.far_has_location=farHasLoc; summary.name_only_used=nameOnly; summary.pv_total=pv.length;
+  return {results, summary};
+}
+
+/* FAR location used for reporting: the FAR's own (after mapping), else — for matched/probable
+   lines — the location of the physical capture; unmatched lines without a FAR location stay blank. */
+function rcEffLocation(f,r,locMap){
+  if(f&&f.location&&String(f.location).trim()) return (locMap&&locMap[rcNorm(f.location)])||String(f.location).trim();
+  if(r&&(r.outcome==='matched'||r.outcome==='review'||r.outcome==='matched_discrepancy')&&r.pv_location) return String(r.pv_location).trim();
+  return '';
+}
+
+/* Summary derived purely from the result rows — so it can be recomputed after a review decision. */
+function rcSummarize(far,results,ctx){
+  ctx=ctx||{}; const locMap=ctx.locMap||{}, byId=new Map(far.map(r=>[r.id,r]));
+  const z=()=>({count:0,cost:0,dep:0,nbv:0});
+  const S={far_total:far.length,matched:0,review:0,missing:0,not_yet_verified:0,surplus:0,pending_matched:0,unique:0,group_assigned:0,
+    by_level:{},by_status:{matched:z(),review:z(),unmatched:z(),surplus:z()},by_location:{},by_department:{},by_category:{},unmapped_locations:[],nbv_priority:ctx.prio||'high',
+    nbv_missing:0,nbv_not_yet_verified:0};
+  const row=(o,k)=>o[k]||(o[k]={expected:0,matched:0,review:0,missing:0,not_yet_verified:0});
+  const num=v=>(v==null||isNaN(v))?0:Number(v), unm=new Set();
+  results.forEach(r=>{
+    if(!r.far_record_id){ S.surplus++; S.by_status.surplus.count++; return; }
+    const f=byId.get(r.far_record_id); if(!f) return;
+    const loc=rcEffLocation(f,r,locMap)||'(no location)';
+    const dep=(f.department||'(no department)').toString().trim()||'(no department)';
+    const cat=(f.category||'(no category)').toString().trim()||'(no category)';
+    if(f.location&&!locMap[rcNorm(f.location)]) unm.add(String(f.location).trim());
+    const oc=r.outcome==='matched_discrepancy'?'matched':r.outcome;
+    [row(S.by_location,loc),row(S.by_department,dep),row(S.by_category,cat)].forEach(o=>{o.expected++; if(o[oc]!==undefined) o[oc]++;});
+    S[oc]=(S[oc]||0)+1;
+    const g=(oc==='missing'||oc==='not_yet_verified')?'unmatched':oc, b=S.by_status[g]||(S.by_status[g]=z());
+    b.count++; b.cost+=num(f.cost); b.dep+=num(f.depreciation); b.nbv+=num(f.nbv);
+    if(oc==='missing') S.nbv_missing+=num(f.nbv); if(oc==='not_yet_verified') S.nbv_not_yet_verified+=num(f.nbv);
+    if(oc==='matched'||oc==='review'){
+      S.by_level[r.level]=(S.by_level[r.level]||0)+1;
+      if(oc==='matched'){ if(r.basis==='unique')S.unique++; else S.group_assigned++; if(r.pv_approval!=='approved')S.pending_matched++; }
+    }
+  });
+  S.unmapped_locations=[...unm].sort();
+  S.resolved_pct=S.far_total?Math.round(1000*S.matched/S.far_total)/10:0;
+  S.probable_pct=S.far_total?Math.round(1000*(S.matched+S.review)/S.far_total)/10:0;
+  S.not_seen=S.missing+S.not_yet_verified; S.nbv_not_seen=S.nbv_missing+S.nbv_not_yet_verified;
+  return S;
+}
+
+/* FIELD GUIDE: a value-free summary field officers can read. NO nbv / cost / depreciation ever enters it.
+   rows: [location, category, product, expected, seen, likely]
+     seen   = matched (incl. accepted other-location pairings)     likely = probable pairings still awaiting review
+   recent: FAR lines bought within `recentDays` of the FAR's latest purchase date that are still unseen (not seen, not likely). */
+function rcBuildGuide(far,results,ctx){
+  ctx=ctx||{}; const locMap=ctx.locMap||{}, recentDays=ctx.recentDays>0?ctx.recentDays:180;
+  const byId=new Map(far.map(r=>[r.id,r])), rows=new Map(), recent=[];
+  let ref=''; far.forEach(f=>{ if(f.acquisition_date&&f.acquisition_date>ref) ref=f.acquisition_date; });
+  let cutoff=''; if(ref){ const d=new Date(ref+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()-recentDays); cutoff=d.toISOString().slice(0,10); }
+  const seenOC=new Set(['matched','matched_discrepancy']), likelyOC=new Set(['review']);
+  let expected=0, seen=0, likely=0;
+  results.forEach(r=>{
+    if(!r.far_record_id) return; const f=byId.get(r.far_record_id); if(!f) return;
+    const loc=rcEffLocation(f,r,locMap)||'(location not on FAR)';
+    const cat=(f.category||'(no category)').toString().trim()||'(no category)';
+    const prod=(f.description||'(no description)').toString().trim()||'(no description)';
+    const k=loc+'\u0001'+cat+'\u0001'+prod, row=rows.get(k)||rows.set(k,[loc,cat,prod,0,0,0]).get(k);
+    const isSeen=seenOC.has(r.outcome), isLikely=likelyOC.has(r.outcome);
+    row[3]++; expected++; if(isSeen){row[4]++; seen++;} else if(isLikely){row[5]++; likely++;}
+    if(!isSeen && !isLikely && cutoff && f.acquisition_date && f.acquisition_date>=cutoff)
+      recent.push({code:f.asset_code,desc:prod,cat,loc,acq:f.acquisition_date});
+  });
+  recent.sort((a,b)=>b.acq.localeCompare(a.acq)||String(a.code).localeCompare(String(b.code),'en',{numeric:true}));
+  return {rows:[...rows.values()].sort((a,b)=>a[0].localeCompare(b[0])||a[1].localeCompare(b[1])||a[2].localeCompare(b[2])),
+          recent:recent.slice(0,600), recent_total:recent.length, recent_days:recentDays, far_as_at:ref||null, expected, seen, likely,
+          far_has_location: far.length>0 && far.filter(f=>f.location&&String(f.location).trim()).length/far.length>=0.5};
+}
+/* ── END RC ENGINE ─────────────────────────────────────────────────── */
+
 /* ══ PROJECT GUIDE (FAR reconciliation, field view) ═══════════════════
-   Shows field officers what the client's FAR expects versus what has been seen,
-   per location / category / product, for the CURRENT project. The data is a
-   value-free summary published by an admin: it has no NBV, cost or serials. */
+   AUTOMATIC. Once an admin has saved a FAR on the project, officers assigned to it get this tab.
+   It shows what the client's FAR expects versus what has been seen, per location / category /
+   product. It is an ESTIMATE worked out on this phone from (a) a value-free copy of the FAR and
+   (b) the project's captures, including this officer's own unsynced ones. It never writes anything.
+   When an admin marks a reconciliation run OFFICIAL, that result replaces the estimate.
+   The FAR copy has no NBV / cost / depreciation. */
 let guideData=null;
 const GD={dim:'loc',f:{loc:null,cat:null,prod:null},q:'',rem:false,openRecent:false};
+const GDS={meta:null,busy:false,loadedAt:0,status:'',dbp:null,mem:{}};
 const GD_IDX={loc:0,cat:1,prod:2}, GD_LBL={loc:'Location',cat:'Category',prod:'Product'}, GD_ORDER=['loc','cat','prod'];
 const GD_NOLOC='(location not on FAR)';
 function gdH(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function gdName(dim,v){return (dim==='loc'&&v===GD_NOLOC)?'Not yet located':v;}
+function gdEnc(s){return encodeURIComponent(String(s));}
+function gdKey(x){return 'atp_guide_'+x+'_'+(currentProjectId||'');}
+
+/* ── pure logic (rows are [location, category, product, expected, seen, likely]) ── */
 function gdRows(data,f){return (data&&data.rows||[]).filter(r=>(!f.loc||r[0]===f.loc)&&(!f.cat||r[1]===f.cat)&&(!f.prod||r[2]===f.prod));}
-function gdTotals(rows){let e=0,s=0;rows.forEach(r=>{e+=r[3];s+=r[4];});return {expected:e,seen:s,remaining:e-s,pct:e?Math.round(1000*s/e)/10:0};}
+function gdTotals(rows){let e=0,s=0,l=0;rows.forEach(r=>{e+=r[3];s+=r[4];l+=(r[5]||0);});
+  return {expected:e,seen:s,likely:l,remaining:Math.max(0,e-s-l),pct:e?Math.round(1000*s/e)/10:0,pctLikely:e?Math.round(1000*(s+l)/e)/10:0};}
 function gdGroup(rows,dim,q,remOnly){
   const m=new Map(),i=GD_IDX[dim],qq=String(q||'').trim().toLowerCase();
-  rows.forEach(r=>{const o=m.get(r[i])||m.set(r[i],{key:r[i],expected:0,seen:0}).get(r[i]);o.expected+=r[3];o.seen+=r[4];});
-  let list=[...m.values()].map(o=>({...o,remaining:o.expected-o.seen}));
+  rows.forEach(r=>{const o=m.get(r[i])||m.set(r[i],{key:r[i],expected:0,seen:0,likely:0}).get(r[i]);o.expected+=r[3];o.seen+=r[4];o.likely+=(r[5]||0);});
+  let list=[...m.values()].map(o=>({...o,remaining:Math.max(0,o.expected-o.seen-o.likely)}));
   if(qq)list=list.filter(o=>gdName(dim,o.key).toLowerCase().includes(qq));
   if(remOnly)list=list.filter(o=>o.remaining>0);
   return list.sort((a,b)=>b.remaining-a.remaining||String(a.key).localeCompare(String(b.key),'en',{numeric:true}));
@@ -2089,23 +2339,91 @@ function gdGroup(rows,dim,q,remOnly){
 function gdRecent(data,f){return (data&&data.recent||[]).filter(x=>(!f.loc||x.loc===f.loc)&&(!f.cat||x.cat===f.cat)&&(!f.prod||x.desc===f.prod));}
 function gdNextDim(cur,f){for(let k=1;k<=3;k++){const d=GD_ORDER[(GD_ORDER.indexOf(cur)+k)%3];if(!f[d])return d;}return cur;}
 
-function gdCacheKey(){return 'atp_guide_'+(currentProjectId||'');}
+/* ── on-device cache (IndexedDB, with in-memory fallback) ── */
+function gdIdb(){return new Promise(res=>{try{const r=indexedDB.open('atp_guide',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>res(null);}catch(e){res(null);}});}
+async function gdGet(k){const db=await(GDS.dbp||(GDS.dbp=gdIdb()));if(!db)return GDS.mem[k]||null;
+  return new Promise(res=>{try{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>res(q.result||null);q.onerror=()=>res(null);}catch(e){res(null);}});}
+async function gdSet(k,v){const db=await(GDS.dbp||(GDS.dbp=gdIdb()));if(!db){GDS.mem[k]=v;return;}
+  return new Promise(res=>{try{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>res();t.onerror=()=>res();}catch(e){res();}});}
+
+/* ── data ── */
+async function gdQuery(table,params){const r=await sb.query(table,params);if(!Array.isArray(r))throw new Error((r&&r.message)||'could not load');return r;}
+function gdFetchMeta(){return gdQuery('recon_field_guide',`?project_id=eq.${gdEnc(currentProjectId)}&select=snapshot_id,enabled,field_lines,loc_map,recent_days,run_id,published_by,published_at`).then(r=>r[0]||null);}
+function gdUsable(m){return !!(m&&m.enabled!==false&&m.snapshot_id&&m.field_lines>0);}
+function gdShowTab(on){const nb=document.getElementById('nb-guide'),bar=document.querySelector('.bnav');if(nb)nb.style.display=on?'':'none';if(bar)bar.classList.toggle('five',!!on);}
 async function loadFieldGuide(){
-  const nb=document.getElementById('nb-guide'),bar=document.querySelector('.bnav');
-  const show=on=>{if(nb)nb.style.display=on?'':'none';if(bar)bar.classList.toggle('five',!!on);};
-  guideData=null;show(false);
-  if(!currentProjectId||typeof CONFIGURED!=='undefined'&&CONFIGURED===false)return;
-  try{
-    const r=await sb.query('recon_field_guide',`?project_id=eq.${encodeURIComponent(currentProjectId)}&select=published_at,published_by,data`);
-    guideData=r&&r[0]?{...r[0].data,published_at:r[0].published_at}:null;
-    try{if(guideData)localStorage.setItem(gdCacheKey(),JSON.stringify(guideData));else localStorage.removeItem(gdCacheKey());}catch(e){}
-  }catch(e){
-    // offline or tables not installed: use the last copy this device saw (offline-first), else no tab
-    try{const c=localStorage.getItem(gdCacheKey());guideData=c?JSON.parse(c):null;}catch(_){guideData=null;}
-  }
-  show(!!guideData);
+  guideData=null;GDS.meta=null;GDS.loadedAt=0;gdShowTab(false);
+  if(!currentProjectId||(typeof CONFIGURED!=='undefined'&&CONFIGURED===false))return;
+  let meta=null;
+  try{meta=await gdFetchMeta();try{localStorage.setItem(gdKey('meta'),JSON.stringify(meta));}catch(e){}}
+  catch(e){try{meta=JSON.parse(localStorage.getItem(gdKey('meta'))||'null');}catch(_){meta=null;}}   // offline: last known setting
+  GDS.meta=meta;gdShowTab(gdUsable(meta));
 }
-async function gdRefresh(){toast('Refreshing guide…');await loadFieldGuide();if(guideData){renderGuide();toast('Guide updated','ok');}else{go('home');toast('No guide published for this project');}}
+async function gdLoadFar(meta){
+  const key='far:'+currentProjectId,c=await gdGet(key);
+  if(c&&c.snapshot_id===meta.snapshot_id)return c.rows;                  // cached on this phone — nothing to download
+  try{
+    const rows=[];
+    for(let off=0;;off+=1000){
+      const r=await gdQuery('recon_field_far',`?project_id=eq.${gdEnc(currentProjectId)}&snapshot_id=eq.${gdEnc(meta.snapshot_id)}&select=id,row_no,asset_code,description,category,location,serial,chassis,engine,acquisition_date&order=row_no.asc,id.asc&limit=1000&offset=${off}`);
+      rows.push(...r);if(r.length<1000)break;
+    }
+    if(!rows.length)throw new Error('You are not assigned to this project, or its FAR has not been shared.');
+    await gdSet(key,{snapshot_id:meta.snapshot_id,rows});return rows;
+  }catch(e){if(c&&c.rows)return c.rows;throw e;}
+}
+const GD_CAPCOLS='id,barcode,name,category,sub_category,location,serial,custom_fields,approval_status,updated_at';
+async function gdLoadCaps(full){
+  const key='cap:'+currentProjectId,c=await gdGet(key);
+  const fresh=!c||full||(Date.now()-(c.fullAt||0)>864e5);          // full re-download daily, or on ↻
+  const map=fresh?{}:{...c.map};let since=fresh?null:c.maxUpdated;
+  try{
+    for(let off=0;;off+=1000){
+      const r=await gdQuery('assets',`?project_id=eq.${gdEnc(currentProjectId)}&select=${GD_CAPCOLS}${since?`&updated_at=gte.${gdEnc(since)}`:''}&order=updated_at.asc,id.asc&limit=1000&offset=${off}`);
+      r.forEach(a=>{map[a.id]=a;if(a.updated_at&&(!since||a.updated_at>since))since=a.updated_at;});
+      if(r.length<1000)break;
+    }
+    await gdSet(key,{map,maxUpdated:since,fullAt:fresh?Date.now():c.fullAt});
+    return {map,offline:false};
+  }catch(e){if(c&&c.map)return {map:c.map,offline:true};throw e;}
+}
+function gdCfKeys(){const o={chassis:null,engine:null};(typeof customFields!=='undefined'&&customFields||[]).forEach(d=>{const l=rcNorm(d.label||d.key);if(l.includes('chassis'))o.chassis=d.key;else if(l.includes('engine'))o.engine=d.key;});return o;}
+function gdToPv(a,ck,approval){const cf=_parseCF(a);return {id:a.id||('q'+a.barcode),barcode:String(a.barcode),name:a.name,category:a.category,sub_category:a.sub_category,location:a.location,
+  serial:a.serial,chassis:ck.chassis?cf[ck.chassis]:null,engine:ck.engine?cf[ck.engine]:null,approval_status:approval||a.approval_status||'pending'};}
+async function gdEstimate(meta,full){
+  const far=await gdLoadFar(meta),caps=await gdLoadCaps(full),ck=gdCfKeys(),seen=new Set(),pv=[];
+  Object.values(caps.map).forEach(a=>{if(!a.barcode||a.approval_status==='rejected')return;seen.add(String(a.barcode));pv.push(gdToPv(a,ck));});
+  let own=0;try{(getPendingQueue()||[]).forEach(a=>{if(a&&a.barcode&&a.project_id===currentProjectId&&!seen.has(String(a.barcode))){seen.add(String(a.barcode));pv.push(gdToPv(a,ck,'pending'));own++;}});}catch(e){}
+  await new Promise(r=>setTimeout(r,20));                               // let the screen paint "Updating…" first
+  const farE=far.map(r=>({...r,nbv:null})),locMap=meta.loc_map||{};
+  const out=rcEngine({far:farE,pv,locMap,coverage:{},settings:{nbv_priority:'high',cross_location:'review',junk:['n/a','na','none','unknown','nil','null','tbc','tba','-','--']}});
+  const g=rcBuildGuide(farE,out.results,{locMap,recentDays:meta.recent_days||180});
+  return {...g,mode:'estimate',asAt:new Date().toISOString(),captures:pv.length,unsynced:own,offline:caps.offline};
+}
+async function gdOfficial(meta,offline){
+  const key='off:'+currentProjectId,c=await gdGet(key);
+  if(c&&c.published_at===meta.published_at)return {...c.data,mode:'official',asAt:meta.published_at,by:meta.published_by};
+  try{const r=await gdQuery('recon_field_guide',`?project_id=eq.${gdEnc(currentProjectId)}&select=data`);const data=(r[0]&&r[0].data)||{};
+    await gdSet(key,{published_at:meta.published_at,data});return {...data,mode:'official',asAt:meta.published_at,by:meta.published_by};}
+  catch(e){if(c)return {...c.data,mode:'official',asAt:c.published_at,by:meta.published_by,offline:true};throw e;}
+}
+function gdOpen(){renderGuide();if(!guideData||Date.now()-GDS.loadedAt>60000)gdRefresh(false);}
+async function gdRefresh(full){
+  if(GDS.busy)return;GDS.busy=true;GDS.status='Updating…';renderGuide();
+  try{
+    let meta=GDS.meta,offline=false;
+    try{meta=await gdFetchMeta();GDS.meta=meta;try{localStorage.setItem(gdKey('meta'),JSON.stringify(meta));}catch(e){}}catch(e){offline=true;}
+    if(!gdUsable(meta)){gdShowTab(false);guideData=null;GDS.status='';toast('The Guide is not available for this project');go('home');return;}
+    guideData=meta.run_id?await gdOfficial(meta,offline):await gdEstimate(meta,!!full);
+    GDS.loadedAt=Date.now();GDS.status='';
+    try{await gdSet('last:'+currentProjectId,guideData);}catch(e){}
+  }catch(e){
+    const last=await gdGet('last:'+currentProjectId);if(last&&!guideData)guideData=last;
+    GDS.status=guideData?'Could not update — showing the last copy saved on this phone.':'Could not load the Guide: '+(e&&e.message||'no connection');
+  }finally{GDS.busy=false;renderGuide();}
+}
+
+/* ── screen ── */
 function gdSetDim(d){GD.dim=d;renderGuide();}
 function gdPick(i){const list=gdGroup(gdRows(guideData,GD.f),GD.dim,GD.q,GD.rem);const o=list[i];if(!o)return;if(GD.f[GD.dim])return;GD.f[GD.dim]=o.key;GD.dim=gdNextDim(GD.dim,GD.f);GD.q='';renderGuide();}
 function gdClear(d){GD.f[d]=null;GD.dim=d;GD.q='';renderGuide();}
@@ -2114,13 +2432,16 @@ function gdToggleRem(){GD.rem=!GD.rem;renderGuide();}
 function gdToggleRecent(){GD.openRecent=!GD.openRecent;renderGuide();}
 function renderGuide(keepFocus){
   const el=document.getElementById('guide-body');if(!el)return;
-  if(!guideData){el.innerHTML='<div style="padding:30px 20px;text-align:center;color:var(--text2);font-weight:800;">No guide has been published for this project yet.</div>';return;}
-  const rows=gdRows(guideData,GD.f),T=gdTotals(rows),list=gdGroup(rows,GD.dim,GD.q,GD.rem),rec=gdRecent(guideData,GD.f);
+  if(!guideData){el.innerHTML=`<div style="padding:30px 20px;text-align:center;color:var(--text2);font-weight:800;">${GDS.busy?'⏳ Working out what has been seen…<div style="font-weight:600;font-size:12px;margin-top:6px;">The first time can take a few seconds while the register downloads.</div>':gdH(GDS.status||'No guide available for this project.')}</div>`;return;}
+  const rows=gdRows(guideData,GD.f),T=gdTotals(rows),list=gdGroup(rows,GD.dim,GD.q,GD.rem),rec=gdRecent(guideData,GD.f),off=guideData.mode==='official';
   const chips=GD_ORDER.filter(d=>GD.f[d]).map(d=>`<button class="gd-chip" onclick="gdClear('${d}')">${GD_LBL[d]}: ${gdH(gdName(d,GD.f[d]))} ✕</button>`).join('');
-  const asAt=guideData.published_at?new Date(guideData.published_at).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
-  let h=`<div class="gd-sum"><div class="gd-big">${T.seen.toLocaleString()} <span>of ${T.expected.toLocaleString()} seen</span></div>
-      <div class="gd-bar"><i style="width:${Math.min(100,T.pct)}%"></i></div>
-      <div class="gd-sub">${T.pct}% · <b>${T.remaining.toLocaleString()} still to find</b> · updated ${gdH(asAt)} <button class="gd-link" onclick="gdRefresh()">↻ refresh</button></div></div>`;
+  const asAt=guideData.asAt?new Date(guideData.asAt).toLocaleString('en-GB',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+  let h=off?`<div class="gd-mode off"><b>OFFICIAL RESULT</b> · the admin's reconciliation · as at ${gdH(asAt)}${guideData.offline?' · saved copy':''}</div>`
+           :`<div class="gd-mode est"><b>FIELD ESTIMATE</b> · live from captures${guideData.unsynced?` · includes ${guideData.unsynced} of your unsynced`:''}${guideData.offline?' · offline, last downloaded data':''} · not the official reconciliation</div>`;
+  h+=`<div class="gd-sum"><div class="gd-big">${T.seen.toLocaleString()} <span>of ${T.expected.toLocaleString()} seen${T.likely?` · ${T.likely.toLocaleString()} likely`:''}</span></div>
+      <div class="gd-bar"><i style="width:${Math.min(100,T.pct)}%"></i><i class="lk" style="width:${Math.min(100-Math.min(100,T.pct),T.expected?100*T.likely/T.expected:0)}%"></i></div>
+      <div class="gd-sub">${T.pct}% seen · <b>${T.remaining.toLocaleString()} still to find</b> · ${gdH(asAt)} <button class="gd-link" onclick="gdRefresh(true)">↻ refresh</button></div>
+      ${GDS.status?`<div class="gd-sub" style="margin-top:4px;color:var(--acc2);font-weight:800;">${gdH(GDS.status)}</div>`:''}</div>`;
   if(guideData.far_has_location===false)h+=`<div class="gd-note">The client's register has no locations, so a location only shows where items were already found. Items not found yet appear under “Not yet located”.</div>`;
   if(rec.length){
     h+=`<div class="gd-alert" onclick="gdToggleRecent()"><b>🆕 ${rec.length} recently bought item${rec.length>1?'s':''} not seen yet</b><span>${GD.openRecent?'hide ▲':'show ▼'}</span></div>`;
@@ -2131,10 +2452,10 @@ function renderGuide(keepFocus){
      <div class="gd-tools"><input id="gd-q" class="fi" placeholder="Search ${GD_LBL[GD.dim].toLowerCase()}…" value="${gdH(GD.q)}" oninput="gdSearch(this.value)">
      <button class="gd-tog ${GD.rem?'on':''}" onclick="gdToggleRem()">${GD.rem?'✓ ':''}Still to find only</button></div><div class="gd-list">`;
   if(!list.length)h+=`<div style="padding:22px;text-align:center;color:var(--text3);font-weight:800;">Nothing to show</div>`;
-  h+=list.slice(0,300).map((o,i)=>{const p=o.expected?Math.min(100,100*o.seen/o.expected):0,done=o.remaining<=0;
+  h+=list.slice(0,300).map((o,i)=>{const p=o.expected?Math.min(100,100*o.seen/o.expected):0,pl=o.expected?Math.min(100-p,100*o.likely/o.expected):0,done=o.remaining<=0;
     return `<div class="gd-item ${done?'done':''}" onclick="gdPick(${i})"><div class="gd-it-top"><div class="gd-it-name">${gdH(gdName(GD.dim,o.key))}</div>
-      <div class="gd-it-n">${o.seen}<span>/${o.expected}</span></div></div><div class="gd-bar sm"><i style="width:${p}%"></i></div>
-      <div class="gd-it-sub">${done?'✓ all seen':`<b>${o.remaining}</b> still to find`}</div></div>`;}).join('')+(list.length>300?`<div style="padding:12px;text-align:center;color:var(--text3);">Showing top 300 — use search to narrow.</div>`:'')+`</div>`;
+      <div class="gd-it-n">${o.seen}<span>/${o.expected}</span></div></div><div class="gd-bar sm"><i style="width:${p}%"></i><i class="lk" style="width:${pl}%"></i></div>
+      <div class="gd-it-sub">${done?(o.likely?`✓ all accounted for (${o.likely} likely)`:'✓ all seen'):`<b>${o.remaining}</b> still to find${o.likely?` · ${o.likely} likely seen`:''}`}</div></div>`;}).join('')+(list.length>300?`<div style="padding:12px;text-align:center;color:var(--text3);">Showing top 300 — use search to narrow.</div>`:'')+`</div>`;
   el.innerHTML=h;
   if(keepFocus){const q=document.getElementById('gd-q');if(q){q.focus();const n=q.value.length;try{q.setSelectionRange(n,n);}catch(e){}}}
 }
@@ -2148,7 +2469,7 @@ function go(name){
   if(nb)nb.classList.add('on');
   if(name==='register')resetForm();
   if(name==='spool')renderSpool();
-  if(name==='guide')renderGuide();
+  if(name==='guide')gdOpen();
   if(name==='audit')renderAudit();
   if(name==='history')renderHistory();
 }
