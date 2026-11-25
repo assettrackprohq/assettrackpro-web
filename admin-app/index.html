@@ -1027,7 +1027,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <div class="card"><div class="card-ttl">4. Exercise status <span>controls Missing vs Not yet verified</span></div><div id="rc-cov"></div></div>
         <div class="card"><div class="card-ttl">5. Matching settings <span>this project only</span></div><div id="rc-set"></div></div>
         <div class="card"><div class="card-ttl">6. Run &amp; summary</div><div id="rc-run"></div></div>
-        <div class="card"><div class="card-ttl">7. Field Guide <span>what field officers see in the Field App</span></div><div id="rc-guide"></div></div>
+        <div class="card"><div class="card-ttl">7. Field Guide <span>automatic for field officers · make a run Official</span></div><div id="rc-guide"></div></div>
         <div class="card"><div class="card-ttl">8. Results <span>side by side, FAR beside physical verification</span></div><div id="rc-res"></div></div>
       </div>
     </div>
@@ -4617,30 +4617,31 @@ function rcSummarize(far,results,ctx){
   return S;
 }
 
-/* FIELD GUIDE (Phase 1B): a value-free summary field officers can read.
-   NO nbv / cost / depreciation / serial numbers ever enter it.
-   rows: [location, category, product, expected, seen]   (seen = matched + probable)
-   recent: FAR lines bought within `recentDays` of the FAR's latest purchase date that are still unseen. */
+/* FIELD GUIDE: a value-free summary field officers can read. NO nbv / cost / depreciation ever enters it.
+   rows: [location, category, product, expected, seen, likely]
+     seen   = matched (incl. accepted other-location pairings)     likely = probable pairings still awaiting review
+   recent: FAR lines bought within `recentDays` of the FAR's latest purchase date that are still unseen (not seen, not likely). */
 function rcBuildGuide(far,results,ctx){
   ctx=ctx||{}; const locMap=ctx.locMap||{}, recentDays=ctx.recentDays>0?ctx.recentDays:180;
   const byId=new Map(far.map(r=>[r.id,r])), rows=new Map(), recent=[];
   let ref=''; far.forEach(f=>{ if(f.acquisition_date&&f.acquisition_date>ref) ref=f.acquisition_date; });
   let cutoff=''; if(ref){ const d=new Date(ref+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()-recentDays); cutoff=d.toISOString().slice(0,10); }
-  const seenOC=new Set(['matched','review','matched_discrepancy']);
-  let expected=0, seen=0;
+  const seenOC=new Set(['matched','matched_discrepancy']), likelyOC=new Set(['review']);
+  let expected=0, seen=0, likely=0;
   results.forEach(r=>{
     if(!r.far_record_id) return; const f=byId.get(r.far_record_id); if(!f) return;
     const loc=rcEffLocation(f,r,locMap)||'(location not on FAR)';
     const cat=(f.category||'(no category)').toString().trim()||'(no category)';
     const prod=(f.description||'(no description)').toString().trim()||'(no description)';
-    const k=loc+'\u0001'+cat+'\u0001'+prod, row=rows.get(k)||rows.set(k,[loc,cat,prod,0,0]).get(k);
-    const isSeen=seenOC.has(r.outcome); row[3]++; expected++; if(isSeen){row[4]++; seen++;}
-    if(!isSeen && cutoff && f.acquisition_date && f.acquisition_date>=cutoff)
+    const k=loc+'\u0001'+cat+'\u0001'+prod, row=rows.get(k)||rows.set(k,[loc,cat,prod,0,0,0]).get(k);
+    const isSeen=seenOC.has(r.outcome), isLikely=likelyOC.has(r.outcome);
+    row[3]++; expected++; if(isSeen){row[4]++; seen++;} else if(isLikely){row[5]++; likely++;}
+    if(!isSeen && !isLikely && cutoff && f.acquisition_date && f.acquisition_date>=cutoff)
       recent.push({code:f.asset_code,desc:prod,cat,loc,acq:f.acquisition_date});
   });
   recent.sort((a,b)=>b.acq.localeCompare(a.acq)||String(a.code).localeCompare(String(b.code),'en',{numeric:true}));
   return {rows:[...rows.values()].sort((a,b)=>a[0].localeCompare(b[0])||a[1].localeCompare(b[1])||a[2].localeCompare(b[2])),
-          recent:recent.slice(0,600), recent_total:recent.length, recent_days:recentDays, far_as_at:ref||null, expected, seen,
+          recent:recent.slice(0,600), recent_total:recent.length, recent_days:recentDays, far_as_at:ref||null, expected, seen, likely,
           far_has_location: far.length>0 && far.filter(f=>f.location&&String(f.location).trim()).length/far.length>=0.5};
 }
 /* ── END RC ENGINE ─────────────────────────────────────────────────── */
@@ -4690,8 +4691,34 @@ function rcFarHasLoc(){return RC.far.length>0&&RC.far.filter(r=>r.location&&Stri
 async function rcFetch(path,opts={}){
   const r=await fetch(SUPABASE_URL+'/rest/v1/'+path,{...opts,headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+authToken(),'Content-Type':'application/json',...(opts.headers||{})}});
   const t=await r.text();
-  if(!r.ok){ if(/PGRST205|42P01|schema cache/i.test(t)) throw new Error('RECON_TABLES_MISSING'); let m=t; try{m=JSON.parse(t).message||t;}catch(e){} throw new Error(m||('HTTP '+r.status)); }
+  if(!r.ok) throw new Error(rcFriendly(t,r.status));
   return t?JSON.parse(t):null;
+}
+function rcFriendly(t,status){
+  let m=t;try{m=JSON.parse(t).message||t;}catch(e){}
+  if(/PGRST204|Could not find the '[^']+' column|recon_far_code_unique|column [^ ]+ does not exist/i.test(t)) return 'RECON_UPGRADE_NEEDED';
+  if(/PGRST205|42P01|Could not find the table|relation .* does not exist/i.test(t)) return 'RECON_TABLES_MISSING';
+  if(/row-level security|42501/i.test(t)) return 'The database refused this change (permission). Only an Admin or Super Owner of this company can do it.';
+  if(/snapshot is .* locked/i.test(m)) return 'This FAR snapshot is locked and cannot be changed.';
+  return m||('HTTP '+status);
+}
+function rcMsg(e){
+  const m=(e&&e.message)||String(e);
+  if(m==='RECON_UPGRADE_NEEDED') return 'The reconciliation database needs the one-time upgrade. Run the latest recon-phase1.sql in Supabase (SQL Editor), then try again.';
+  if(m==='RECON_TABLES_MISSING') return 'The reconciliation tables are not installed. Run recon-phase1.sql in Supabase (SQL Editor).';
+  return m;
+}
+/* Is the database at the version this screen needs? Checked before anything else. */
+async function rcSchemaCheck(){
+  const probes=[['recon_far_records','asset_code2,alt_description,asset_class,chassis,engine,depreciation'],['recon_field_far','id'],['recon_field_guide','enabled,field_lines,loc_map,recent_days']];
+  for(const [t,c] of probes){ try{await rcFetch(`${t}?select=${c}&limit=1`);}catch(e){return e.message==='RECON_TABLES_MISSING'?'RECON_TABLES_MISSING':'RECON_UPGRADE_NEEDED';} }
+  return 'ok';
+}
+function rcBlocked(code){
+  document.getElementById('rc-body').style.display='none';
+  document.getElementById('rc-msg').innerHTML=code==='RECON_TABLES_MISSING'
+    ?'⚠ The reconciliation tables are not installed yet. Open <b>Supabase → SQL Editor</b>, run <b>recon-phase1.sql</b>, then reload this tab.'
+    :'⚠ The reconciliation database needs a <b>one-time upgrade</b>. Open <b>Supabase → SQL Editor</b>, run the latest <b>recon-phase1.sql</b> (safe to run again; it keeps your data), then reload this tab.';
 }
 async function rcAll(table,params){const out=[];for(let off=0;;off+=1000){const rows=await rcFetch(table+params+'&limit=1000&offset='+off);out.push(...rows);if(rows.length<1000)break;}return out;}
 async function rcInsert(table,rows,size=500,onConflict){
@@ -4708,6 +4735,7 @@ function renderRecon(){
   if(!rcCan()){document.getElementById('rc-body').style.display='none';document.getElementById('rc-msg').innerHTML='⛔ FAR Reconciliation is available to Admin and Super Owner roles only.';return;}
   if(!rcCid()){document.getElementById('rc-body').style.display='none';document.getElementById('rc-msg').innerHTML='Select a company workspace first.';return;}
   document.getElementById('rc-msg').innerHTML='';
+  if(!RC.pid){try{const last=localStorage.getItem('atp_recon_proj_'+rcCid());if(last&&allProjects.some(p=>p.id===last))RC.pid=last;}catch(e){}}
   sel.innerHTML='<option value="">Select a project…</option>'+allProjects.map(p=>`<option value="${rcH(p.id)}" ${p.id===RC.pid?'selected':''}>${rcH(p.name)}</option>`).join('');
   if(RC.pid&&!allProjects.some(p=>p.id===RC.pid)){RC.pid=null;}
   document.getElementById('rc-body').style.display=RC.pid?'':'none';
@@ -4715,6 +4743,7 @@ function renderRecon(){
 }
 function rcProjectChanged(){
   RC.pid=document.getElementById('rc-project').value||null;
+  try{if(RC.pid)localStorage.setItem('atp_recon_proj_'+rcCid(),RC.pid);}catch(e){}
   RC.snap=null;RC.far=[];RC.farById={};RC.maps={};RC.cov={};RC.runs=[];RC.runId=null;RC.results=[];RC.up=null;
   document.getElementById('rc-body').style.display=RC.pid?'':'none';
   if(RC.pid) rcLoadProject();
@@ -4722,6 +4751,8 @@ function rcProjectChanged(){
 async function rcLoadProject(){
   const cid=rcCid(),pid=RC.pid; rcBusy(true,'Loading project data…');
   try{
+    const sc=await rcSchemaCheck(); if(sc!=='ok'){rcBusy(false);rcBlocked(sc);return;}
+    document.getElementById('rc-msg').innerHTML='';
     const snaps=await rcFetch(`recon_far_snapshots?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&status=eq.committed&select=*`);
     RC.snap=snaps[0]||null;
     RC.far=RC.snap?await rcAll('recon_far_records',`?snapshot_id=eq.${rcQ(RC.snap.id)}&select=*&order=row_no.asc,id.asc`):[];
@@ -4730,19 +4761,19 @@ async function rcLoadProject(){
     RC.maps={};maps.forEach(m=>RC.maps[m.source_value]=m);
     const cov=await rcFetch(`recon_location_coverage?project_id=eq.${rcQ(pid)}&select=*`);
     RC.cov={};cov.forEach(c=>RC.cov[rcCovKey(c.location)]=c);
-    RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id&order=created_at.desc`);
+    RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id,locked&order=created_at.desc`);
     const cfg=await rcFetch(`config?company_id=eq.${rcQ(cid)}&key=eq.${rcQ('recon_settings:'+pid)}&select=value`);
     let s=null;try{s=cfg[0]?JSON.parse(cfg[0].value):null;}catch(e){}
     RC.settings={...RC_DEFAULT_SETTINGS,...(s||{})};
-    RC.guide=null;try{const g=await rcFetch(`recon_field_guide?project_id=eq.${rcQ(pid)}&select=id,run_id,published_by,published_at,recent_days:data->recent_days,expected:data->expected,seen:data->seen,recent_total:data->recent_total`);RC.guide=g[0]||null;}catch(e){RC.guide=null;}
+    RC.guide=null;try{const g=await rcFetch(`recon_field_guide?project_id=eq.${rcQ(pid)}&select=id,enabled,field_lines,recent_days,run_id,published_by,published_at,snapshot_id`);RC.guide=g[0]||null;}catch(e){RC.guide=null;}
     if(!RC.runs.some(r=>r.id===RC.runId)) RC.runId=RC.runs[0]?RC.runs[0].id:null;
     rcBusy(false);
     rcRenderAll();
     if(RC.runId) rcLoadResults(RC.runId);
   }catch(e){
     rcBusy(false);
-    if(e.message==='RECON_TABLES_MISSING'){document.getElementById('rc-body').style.display='none';document.getElementById('rc-msg').innerHTML='⚠ The reconciliation tables are not installed yet. Run <b>recon-phase1.sql</b> in the Supabase SQL editor, then reopen this tab.';}
-    else toast('Could not load: '+e.message,'err');
+    if(e.message==='RECON_TABLES_MISSING'||e.message==='RECON_UPGRADE_NEEDED') rcBlocked(e.message);
+    else toast('Could not load: '+rcMsg(e),'err');
   }
 }
 function rcRenderAll(){rcRenderSnap();rcRenderMap();rcRenderCov();rcRenderSettings();rcRenderRunCard();rcRenderGuide();}
@@ -4762,7 +4793,7 @@ function rcRenderSnap(){
   el.innerHTML=h; if(RC.up) rcRenderUpload();
 }
 function rcHandleFile(inp){
-  const f=inp.files[0];if(!f)return;
+  const f=inp.files[0];if(!f)return;RC.upErr=null;
   if(f.size>15*1024*1024){toast('File too large (max 15 MB)','err');return;}
   const rd=new FileReader();
   rd.onload=e=>{try{const wb=XLSX.read(e.target.result,{type:'array'});RC.up={name:f.name,wb,sheet:wb.SheetNames[0]};rcLoadSheet();}catch(err){toast('Could not read file: '+err.message,'err');}};
@@ -4814,7 +4845,7 @@ function rcBuild(){
 function rcRenderUpload(){
   const u=RC.up,el=document.getElementById('rc-upload');if(!u||!el)return;
   const opts=k=>`<option value="-1">— not in file —</option>`+u.headers.map((h,i)=>`<option value="${i}" ${u.map[k]===i?'selected':''}>${rcH(h||('Column '+(i+1)))}</option>`).join('');
-  let h=`<div style="font-size:12px;font-weight:800;margin:6px 0;">📄 ${rcH(u.name)} — ${u.rows.length.toLocaleString()} data rows</div>`;
+  let h=(RC.upErr?`<div style="margin:8px 0;padding:10px 14px;border:2px solid #c0392b;border-radius:10px;background:rgba(192,57,43,.08);color:#c0392b;font-size:12px;font-weight:800;">✖ Not committed — nothing was saved.<div style="font-weight:700;margin-top:4px;color:var(--text);">${rcH(RC.upErr)}</div></div>`:'')+`<div style="font-size:12px;font-weight:800;margin:6px 0;">📄 ${rcH(u.name)} — ${u.rows.length.toLocaleString()} data rows</div>`;
   if(u.wb.SheetNames.length>1)h+=`<div class="fg"><div class="fl">Sheet</div><select class="fi" onchange="rcSetSheet(this.value)">${u.wb.SheetNames.map(s=>`<option ${s===u.sheet?'selected':''}>${rcH(s)}</option>`).join('')}</select></div>`;
   h+=`<div style="font-size:12px;font-weight:800;margin:10px 0 6px;">Match your columns <span style="font-weight:600;color:var(--text3)">(auto-detected — check before continuing; only * fields are required)</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;">`+
     RC_FIELDS.map(([k,l])=>`<div class="fg" style="margin:0"><div class="fl">${l}</div><select class="fi" onchange="rcSetMap('${k}',this.value)">${opts(k)}</select></div>`).join('')+`</div>`;
@@ -4839,29 +4870,33 @@ async function rcCommit(){
   const u=RC.up;if(!u||!u.built||RC.busy)return;
   const {recs,iss}=u.built;
   if(RC.snap&&!confirm('This replaces the current committed FAR for this project. Earlier runs keep their own snapshot. Continue?'))return;
-  const cid=rcCid(),pid=RC.pid,snapId=rcUuid(),oldSnap=RC.snap;
-  rcBusy(true,'Uploading FAR snapshot…');
+  const cid=rcCid(),pid=RC.pid,snapId=rcUuid(),oldSnap=RC.snap,rows=recs.map(r=>({...r,id:rcUuid()}));
+  RC.upErr=null;rcBusy(true,'Uploading FAR snapshot…');
   try{
     await rcFetch('recon_far_snapshots',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({id:snapId,company_id:cid,project_id:pid,name:u.name,source_file:u.name,status:'draft',uploaded_by:rcWho()})});
     try{
-      await rcInsert('recon_far_records',recs.map(r=>({...r,snapshot_id:snapId,company_id:cid,project_id:pid})));
+      await rcInsert('recon_far_records',rows.map(r=>({...r,snapshot_id:snapId,company_id:cid,project_id:pid})));
       if(oldSnap) await rcFetch('recon_far_snapshots?id=eq.'+rcQ(oldSnap.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'superseded'})});
       try{
         await rcFetch('recon_far_snapshots?id=eq.'+rcQ(snapId),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'committed',row_count:recs.length,committed_at:new Date().toISOString(),
           meta:{column_map:u.map,headers:u.headers,blank_rows:iss.blank.slice(0,200),duplicates:Object.entries(iss.dupCodes).slice(0,300).map(([c,n])=>({code:c,lines:n})),validation:{noloc:iss.noloc,nodesc:iss.nodesc,junk_serial:iss.junkSerial,bad_numbers:iss.badNbv,bad_dates:iss.badDate}}})});
       }catch(e){ if(oldSnap) await rcFetch('recon_far_snapshots?id=eq.'+rcQ(oldSnap.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({status:'committed'})}).catch(()=>{}); throw e; }
     }catch(e){ await rcFetch('recon_far_snapshots?id=eq.'+rcQ(snapId),{method:'DELETE'}).catch(()=>{}); throw e; }
-    RC.up=null;rcBusy(false);toast(`✅ FAR committed: ${recs.length.toLocaleString()} lines`,'ok');await rcLoadProject();
-  }catch(e){rcBusy(false);toast('Upload failed — nothing was committed: '+e.message,'err');}
+    let fieldErr=null;rcBusy(true,'Sharing with field officers…');
+    try{await rcSyncFieldCopy(rows,snapId,true);}catch(e){fieldErr=e;}
+    RC.up=null;rcBusy(false);await rcLoadProject();
+    if(fieldErr)toast('FAR saved, but sharing it with field officers failed: '+rcMsg(fieldErr)+' — use “Rebuild field copy” in step 7.','err');
+    else toast(`✅ FAR saved to this project (${recs.length.toLocaleString()} lines) and shared with field officers`,'ok');
+  }catch(e){rcBusy(false);RC.upErr=rcMsg(e);rcRenderUpload();toast('Not committed — nothing was saved. '+rcMsg(e),'err');}
 }
 
 /* ── 2. Location mapping (only when the FAR carries locations) ───── */
-function rcFarLocGroups(){
-  const g={};RC.far.forEach(r=>{const raw=(r.location||'').trim();if(!raw)return;const k=rcNorm(raw);const o=g[k]||(g[k]={k,labels:{},n:0});o.labels[raw]=(o.labels[raw]||0)+1;o.n++;});
+function rcFarLocGroups(rows){
+  const g={};(rows||RC.far).forEach(r=>{const raw=(r.location||'').trim();if(!raw)return;const k=rcNorm(raw);const o=g[k]||(g[k]={k,labels:{},n:0});o.labels[raw]=(o.labels[raw]||0)+1;o.n++;});
   return Object.values(g).sort((a,b)=>b.n-a.n);
 }
 function rcTarget(k,pl){ if(RC.maps[k])return RC.maps[k].target_value; const hit=pl.find(l=>rcNorm(l)===k); return hit||''; }
-function rcLocMap(){const pl=rcProjLocs(),m={};rcFarLocGroups().forEach(g=>{const t=rcTarget(g.k,pl);if(t)m[g.k]=t;});return m;}
+function rcLocMap(rows){const pl=rcProjLocs(),m={};rcFarLocGroups(rows).forEach(g=>{const t=rcTarget(g.k,pl);if(t)m[g.k]=t;});return m;}
 function rcRenderMap(){
   const el=document.getElementById('rc-map');
   if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR first.</div>';return;}
@@ -4886,7 +4921,8 @@ async function rcSaveMap(){
     if(rows.length) await rcInsert('recon_mappings',rows,500,'project_id,kind,source_value');
     for(const id of del) await rcFetch('recon_mappings?id=eq.'+rcQ(id),{method:'DELETE'});
     toast(`✅ Mappings saved (${rows.length} updated, ${del.length} cleared)`,'ok');await rcLoadProject();
-  }catch(e){toast('Save failed: '+e.message,'err');}
+    try{await rcSyncGuideMeta();}catch(e){}
+  }catch(e){toast('Save failed: '+rcMsg(e),'err');}
 }
 
 /* ── 3. Exercise / location coverage ─────────────────────────────── */
@@ -4908,7 +4944,7 @@ function rcRenderCov(){
 async function rcSetCov(loc,status){
   try{await rcInsert('recon_location_coverage',[{company_id:rcCid(),project_id:RC.pid,location:loc,status,updated_by:rcWho(),updated_at:new Date().toISOString()}],1,'project_id,location');
     RC.cov[rcCovKey(loc)]={location:loc,status};rcRenderCov();toast('Status saved','ok');}
-  catch(e){toast('Could not save status: '+e.message,'err');rcRenderCov();}
+  catch(e){toast('Could not save status: '+rcMsg(e),'err');rcRenderCov();}
 }
 
 /* ── 4. Settings (per project, config key recon_settings:<project>) ─ */
@@ -4945,7 +4981,7 @@ async function rcSaveSettings(){
     const p=await rcFetch(`config?company_id=eq.${rcQ(cid)}&key=eq.${rcQ(key)}`,{method:'PATCH',headers:{'Prefer':'return=representation'},body:JSON.stringify({value:val,updated_at:ts})});
     if(Array.isArray(p)&&!p.length) await rcFetch('config',{method:'POST',headers:{'Prefer':'return=minimal'},body:JSON.stringify({company_id:cid,key,value:val,updated_at:ts})});
     RC.settings={...RC_DEFAULT_SETTINGS,...s};toast('✅ Settings saved','ok');
-  }catch(e){toast('Settings not saved: '+e.message,'err');}
+  }catch(e){toast('Settings not saved: '+rcMsg(e),'err');}
 }
 
 /* ── 5. Run + at-a-glance summary ────────────────────────────────── */
@@ -4981,9 +5017,9 @@ async function rcRun(){
     try{ await rcInsert('recon_results',out.results.map(r=>({...r,id:rcUuid(),run_id:runId,company_id:cid,project_id:pid})),1000); }
     catch(e){ await rcFetch('recon_runs?id=eq.'+rcQ(runId),{method:'DELETE'}).catch(()=>{}); throw e; }
     rcBusy(false);toast(`✅ Run saved — ${out.summary.matched.toLocaleString()} matched, ${out.summary.review.toLocaleString()} to review, ${out.summary.not_seen.toLocaleString()} not seen`,'ok');
-    RC.runId=runId;RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id&order=created_at.desc`);
+    RC.runId=runId;RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id,locked&order=created_at.desc`);
     rcRenderSummary();rcRenderGuide();await rcLoadResults(runId);
-  }catch(e){rcBusy(false);toast('Run failed: '+e.message,'err');}
+  }catch(e){rcBusy(false);toast('Run failed: '+rcMsg(e),'err');}
 }
 function rcSelectRun(id){RC.runId=id;RC.page=0;rcRenderSummary();rcRenderGuide();rcLoadResults(id);}
 function rcRenderSummary(){
@@ -5009,7 +5045,7 @@ function rcRenderSummary(){
    ${tbl(S.by_category,'Category','(no category)')}${tbl(S.by_location,'Location','(no location)')}${tbl(S.by_department,'Department','(no department)')}
    <div style="font-size:12px;font-weight:800;margin:14px 0 6px;">Unmatched trend across runs</div>
    <table class="tbl"><tr><th>Run</th><th>By</th><th>Matched</th><th>Probable</th><th>Unmatched</th><th>NBV not seen</th><th>Resolved</th><th></th></tr>`+
-   RC.runs.map(r=>{const s=r.summary||{};return `<tr style="${r.id===run.id?'background:rgba(0,119,204,.07)':''}"><td>${new Date(r.created_at).toLocaleString()}</td><td>${rcH(r.created_by||'—')}</td><td>${rcFmt(s.matched)}</td><td>${rcFmt(s.review)}</td><td>${rcFmt(s.not_seen)}</td><td>₦${rcFmt(s.nbv_not_seen)}</td><td>${bar(s.matched,s.far_total)} ${s.resolved_pct}%</td><td><button class="btn-s act-btn" onclick="rcSelectRun('${r.id}')">View</button></td></tr>`;}).join('')+`</table>`;
+   RC.runs.map(r=>{const s=r.summary||{};return `<tr style="${r.id===run.id?'background:rgba(0,119,204,.07)':''}"><td>${new Date(r.created_at).toLocaleString()}${r.locked&&r.run_type==='final'?' <span class="badge ba">OFFICIAL</span>':''}</td><td>${rcH(r.created_by||'—')}</td><td>${rcFmt(s.matched)}</td><td>${rcFmt(s.review)}</td><td>${rcFmt(s.not_seen)}</td><td>₦${rcFmt(s.nbv_not_seen)}</td><td>${bar(s.matched,s.far_total)} ${s.resolved_pct}%</td><td><button class="btn-s act-btn" onclick="rcSelectRun('${r.id}')">View</button></td></tr>`;}).join('')+`</table>`;
 }
 
 /* ── 6. Results (side by side), review decisions, exports ─────────── */
@@ -5035,8 +5071,8 @@ function rcRenderResults(){
   const box=document.getElementById('rc-res');if(!box)return;
   const all=rcFiltered(),PS=100,pages=Math.max(1,Math.ceil(all.length/PS));if(RC.page>=pages)RC.page=pages-1;
   const cnt=o=>RC.results.filter(r=>o==='all'||r.outcome===o).length,lm=rcLocMap();
-  const slice=all.slice(RC.page*PS,RC.page*PS+PS),nrev=cnt('review');
-  box.innerHTML=`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+  const slice=all.slice(RC.page*PS,RC.page*PS+PS),locked=rcRunLocked(),nrev=locked?0:cnt('review');
+  box.innerHTML=(locked?'<div style="margin-bottom:8px;font-size:12px;font-weight:800;color:var(--acc4);">🔒 This run is the Official result and is locked.</div>':'')+`<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
     <select class="fi" style="width:auto;" onchange="rcSetFilter(this.value)">${[['all','All'],['matched','Matched'],['review','Probable — needs review'],['missing','Missing'],['not_yet_verified','Not yet verified'],['surplus','Surplus']].map(([v,t])=>`<option value="${v}" ${RC.filter===v?'selected':''}>${t} (${cnt(v)})</option>`).join('')}</select>
     <input class="fi" style="width:220px;" placeholder="Search code, description, tag…" value="${rcH(RC.q)}" onchange="rcSetQ(this.value)">
     ${nrev?`<button class="btn-p act-btn" onclick="rcAcceptAll()">✔ Accept all ${nrev} probable</button>`:''}
@@ -5048,7 +5084,7 @@ function rcRenderResults(){
      return `<tr><td>${rcH(f&&f.asset_code)}</td><td>${rcH(f&&f.description)}</td><td>${rcH(f?rcEffLocation(f,r,lm):'')}</td><td>${f?rcFmt(f.nbv):''}</td>
      <td>${rcH(r.barcode)}${r.pv_approval&&r.pv_approval!=='approved'&&r.barcode?' <span title="capture not yet approved" style="color:#b9770e;">●</span>':''}</td><td>${rcH(r.pv_name)}</td><td>${rcH(r.pv_location)}</td>
      <td><span class="badge ${o[0]}">${o[1]}</span></td><td>${r.level?rcH((RC_LEVELS[r.level]||r.level)+' · '+(r.confidence!=null?Math.round(r.confidence)+'%':'')+(r.basis==='group_assigned'?' · group':''))+(r.discrepancies&&r.discrepancies.location?'<div style="color:#b9770e;font-size:10px;font-weight:800;">⚠ location differs: FAR '+rcH(r.discrepancies.location.far)+' · found in '+rcH(r.discrepancies.location.pv||'?')+'</div>':''):''}</td>
-     <td>${r.outcome==='review'?`<button class="btn-s act-btn" title="Accept pairing" onclick="rcDecide('${r.id}','accept')">✔</button> <button class="btn-s act-btn" title="Reject pairing" onclick="rcDecide('${r.id}','reject')">✖</button>`:''}</td></tr>`;}).join('')+`</table></div>
+     <td>${r.outcome==='review'&&!locked?`<button class="btn-s act-btn" title="Accept pairing" onclick="rcDecide('${r.id}','accept')">✔</button> <button class="btn-s act-btn" title="Reject pairing" onclick="rcDecide('${r.id}','reject')">✖</button>`:''}</td></tr>`;}).join('')+`</table></div>
    <div style="font-size:10px;color:var(--text3);margin-top:4px;">*Location: the FAR's own where it has one; otherwise taken from the matched physical capture.</div>
    <div style="display:flex;gap:10px;align-items:center;margin-top:10px;font-size:12px;"><button class="btn-s act-btn" onclick="rcPage(-1)" ${RC.page?'':'disabled'}>‹ Prev</button>Page ${RC.page+1} of ${pages}<button class="btn-s act-btn" onclick="rcPage(1)" ${RC.page<pages-1?'':'disabled'}>Next ›</button></div>`;
 }
@@ -5060,6 +5096,7 @@ async function rcSaveSummary(){
   run.summary=S;
 }
 async function rcDecide(id,decision){
+  if(rcRunLocked()){toast('This run is the Official result and is locked. Remove the official status first to change it.','err');return;}
   const r=RC.results.find(x=>x.id===id);if(!r||r.outcome!=='review'||RC.busy)return;
   const prev={...r},ts={reviewer:rcWho()};
   try{
@@ -5077,9 +5114,10 @@ async function rcDecide(id,decision){
       RC.results.push(sur);
     }
     await rcSaveSummary();rcRenderSummary();rcRenderResults();
-  }catch(e){toast('Decision not saved: '+e.message,'err');}
+  }catch(e){toast('Decision not saved: '+rcMsg(e),'err');}
 }
 async function rcAcceptAll(){
+  if(rcRunLocked()){toast('This run is the Official result and is locked.','err');return;}
   const n=RC.results.filter(r=>r.outcome==='review').length;if(!n||RC.busy)return;
   if(!confirm(`Accept all ${n} probable pairings as matched${RC.results.some(r=>r.outcome==='review'&&r.discrepancies)?' (including items found in a different location)':''}?`))return;
   try{
@@ -5088,7 +5126,7 @@ async function rcAcceptAll(){
     await rcFetch(base+'&discrepancies=not.is.null',{method:'PATCH',headers:hd,body:JSON.stringify({outcome:'matched_discrepancy',review_status:'accepted',reviewer:rcWho()})});
     RC.results.forEach(r=>{if(r.outcome==='review'){r.outcome=r.discrepancies?'matched_discrepancy':'matched';r.review_status='accepted';}});
     await rcSaveSummary();rcRenderSummary();rcRenderResults();toast(`✅ ${n} pairings accepted`,'ok');
-  }catch(e){toast('Not saved: '+e.message,'err');}
+  }catch(e){toast('Not saved: '+rcMsg(e),'err');}
 }
 function rcStamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
 function rcExportCSV(){
@@ -5138,41 +5176,88 @@ async function rcExportXLSX(){
     const pn=((rcProj()||{}).name||'project').replace(/[^a-z0-9]+/gi,'_');
     XLSX.writeFile(wb,`FAR_Reconciliation_${pn}_${rcStamp()}.xlsx`);
     rcBusy(false);toast('✅ Excel report downloaded','ok');
-  }catch(e){rcBusy(false);toast('Export failed: '+e.message,'err');}
+  }catch(e){rcBusy(false);toast('Export failed: '+rcMsg(e),'err');}
 }
 
-/* ── 7. Field Guide: publish a value-free summary for field officers ─ */
+/* ── 7. Field Guide: AUTOMATIC for field officers; an admin run can be made OFFICIAL ─ */
+async function rcSyncFieldCopy(rows,snapId,reset){
+  const cid=rcCid(),pid=RC.pid;
+  await rcFetch(`recon_field_far?project_id=eq.${rcQ(pid)}`,{method:'DELETE'});
+  const copy=rows.map(r=>({id:r.id,snapshot_id:snapId,company_id:cid,project_id:pid,row_no:r.row_no,asset_code:r.asset_code,description:r.description,category:r.category,location:r.location,serial:r.serial,chassis:r.chassis,engine:r.engine,acquisition_date:r.acquisition_date}));   // NO nbv / cost / depreciation
+  await rcInsert('recon_field_far',copy,500);
+  const body={company_id:cid,project_id:pid,snapshot_id:snapId,field_lines:copy.length,loc_map:rcLocMap(rows)};
+  if(reset){body.run_id=null;body.data={};}
+  await rcFetch('recon_field_guide?on_conflict=project_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(body)});
+}
+async function rcSyncGuideMeta(){
+  if(!RC.snap||!RC.guide)return;
+  await rcFetch('recon_field_guide?on_conflict=project_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({company_id:rcCid(),project_id:RC.pid,snapshot_id:RC.snap.id,loc_map:rcLocMap()})});
+}
+function rcGuidePatch(body){return rcFetch(`recon_field_guide?project_id=eq.${rcQ(RC.pid)}&company_id=eq.${rcQ(rcCid())}`,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(body)});}
+function rcRunPatch(id,body){return rcFetch('recon_runs?id=eq.'+rcQ(id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(body)});}
+function rcRunLocked(){const r=RC.runs.find(x=>x.id===RC.runId);return !!(r&&r.locked);}
 function rcRenderGuide(){
   const el=document.getElementById('rc-guide');if(!el)return;
-  if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR and run a reconciliation first.</div>';return;}
-  const g=RC.guide,run=RC.runs.find(r=>r.id===RC.runId);
-  let h=`<div style="font-size:12px;color:var(--text2);margin-bottom:10px;">Publishes a simple <b>Guide</b> tab in the Field App for this project: for each location, category and product, how many the FAR expects and how many have been seen, plus a 🆕 alert for recently purchased items not yet seen. It never includes NBV, cost or serial numbers.</div>`;
-  if(g)h+=`<div style="padding:10px 14px;border:2px solid var(--border);border-radius:10px;background:var(--surf2);margin-bottom:12px;font-size:12px;"><b>📣 Published</b> ${new Date(g.published_at).toLocaleString()} by ${rcH(g.published_by||'—')} — ${rcFmt(g.seen)} of ${rcFmt(g.expected)} seen · ${rcFmt(g.recent_total)} recent unseen · "recent" = within ${rcFmt(g.recent_days)} days of the FAR's latest purchase date</div>`;
-  else h+=`<div style="font-size:12px;margin-bottom:10px;color:var(--text3);">Not published — field officers do not see a Guide tab for this project.</div>`;
-  if(!run){h+='<div style="font-size:12px;color:var(--text3);">Run a reconciliation first (step 6).</div>';el.innerHTML=h;return;}
-  h+=`<div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;"><div class="fg" style="margin:0;"><div class="fl">Treat as "recently purchased" (days)</div><input class="fi" id="rc-g-days" type="number" min="7" max="1500" value="${rcH((g&&g.recent_days)||RC.settings.recent_days||180)}" style="width:150px;"></div>
-   <button class="btn-p act-btn" onclick="rcPublishGuide()">📣 ${g?'Republish':'Publish'} from the run of ${new Date(run.created_at).toLocaleString()}</button>
-   ${g?'<button class="btn-s act-btn" onclick="rcUnpublishGuide()">Unpublish</button>':''}</div>
-   <div style="font-size:11px;color:var(--text3);margin-top:8px;">Field officers see the counts as of the run you publish. Re-run and republish as captures are approved; accepting probable pairings also changes the counts.</div>`;
+  if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR first. The Guide switches itself on for field officers as soon as a FAR is saved.</div>';return;}
+  const g=RC.guide,on=g&&g.enabled!==false,offRun=g&&g.run_id?RC.runs.find(r=>r.id===g.run_id):null,run=RC.runs.find(r=>r.id===RC.runId);
+  let h=`<div style="font-size:12px;color:var(--text2);margin-bottom:12px;">The Guide is <b>automatic</b>. Officers assigned to this project see a <b>Guide</b> tab in the Field App showing what the FAR expects versus what has been seen, worked out live on their phones from the captures (including their own unsynced ones). It is only an estimate: it never changes your reconciliation, and it never includes NBV or cost.</div>`;
+  if(!g||!g.field_lines){
+    h+=`<div style="padding:10px 14px;border:2px solid #b9770e;border-radius:10px;font-size:12px;margin-bottom:10px;">⚠ The field copy of this FAR has not been created, so officers cannot see the Guide yet.</div><button class="btn-p act-btn" onclick="rcRebuildFieldCopy()">Create field copy now</button>`;
+    el.innerHTML=h;return;
+  }
+  h+=`<div style="display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 14px;border:2px solid var(--border);border-radius:10px;background:var(--surf2);margin-bottom:12px;">
+    <div style="font-size:12px;"><b>${on?'🟢 Guide is ON':'⚪ Guide is OFF'}</b> — ${rcFmt(g.field_lines)} FAR lines shared with assigned field officers${on?'':' (hidden: e.g. for a blind count)'}</div>
+    <button class="btn-s act-btn" onclick="rcToggleGuide()">${on?'Switch off':'Switch on'}</button></div>
+   <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px;"><div class="fg" style="margin:0;"><div class="fl">“Recently bought” alert = within (days) of the FAR's latest purchase</div>
+     <input class="fi" id="rc-g-days" type="number" min="7" max="1500" value="${rcH(g.recent_days||180)}" style="width:150px;"></div><button class="btn-s act-btn" onclick="rcSaveRecent()">Save</button></div>`;
+  if(offRun)h+=`<div style="padding:10px 14px;border:2px solid var(--acc4);border-radius:10px;font-size:12px;margin-bottom:10px;"><b>✅ Official result</b> — the run of ${new Date(offRun.created_at).toLocaleString()}, marked by ${rcH(g.published_by||'—')} on ${g.published_at?new Date(g.published_at).toLocaleDateString():''}. Field officers now see this instead of their live estimate. The run is locked.
+     <div style="margin-top:8px;"><button class="btn-s act-btn" onclick="rcRemoveOfficial()">Remove official status</button></div></div>`;
+  else h+=`<div style="font-size:12px;color:var(--text2);margin-bottom:10px;">No official result yet — field officers see their live estimate. When your reconciliation is complete, make a run <b>Official</b> and it replaces the estimate.</div>`;
+  if(run&&(!offRun||offRun.id!==run.id))h+=`<button class="btn-p act-btn" onclick="rcMarkOfficial()">⭐ Make the run of ${new Date(run.created_at).toLocaleString()} the Official result</button>`;
+  h+=` <button class="btn-s act-btn" onclick="rcRebuildFieldCopy()">Rebuild field copy</button>`;
   el.innerHTML=h;
 }
-async function rcPublishGuide(){
-  if(RC.busy||!RC.runId||!RC.results.length){toast('Open a saved run first','err');return;}
-  const days=Math.min(1500,Math.max(7,parseInt(document.getElementById('rc-g-days').value,10)||180));
-  const data=rcBuildGuide(RC.far,RC.results,{locMap:rcLocMap(),recentDays:days});
-  if(JSON.stringify(data).length>4e6){toast('Guide too large to publish','err');return;}
-  rcBusy(true,'Publishing field guide…');
-  try{
-    await rcFetch('recon_field_guide?on_conflict=project_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
-      body:JSON.stringify({company_id:rcCid(),project_id:RC.pid,snapshot_id:RC.snap.id,run_id:RC.runId,data,published_by:rcWho(),published_at:new Date().toISOString()})});
-    RC.guide={run_id:RC.runId,published_by:rcWho(),published_at:new Date().toISOString(),recent_days:days,expected:data.expected,seen:data.seen,recent_total:data.recent_total};
-    rcBusy(false);rcRenderGuide();toast(`✅ Field Guide published — ${data.seen} of ${data.expected} seen, ${data.recent_total} recent unseen`,'ok');
-  }catch(e){rcBusy(false);toast('Not published: '+e.message,'err');}
+async function rcRebuildFieldCopy(){
+  if(RC.busy||!RC.snap)return;rcBusy(true,'Rebuilding field copy…');
+  try{await rcSyncFieldCopy(RC.far,RC.snap.id,false);await rcLoadProject();rcBusy(false);toast('✅ Field copy rebuilt','ok');}
+  catch(e){rcBusy(false);toast('Could not rebuild: '+rcMsg(e),'err');}
 }
-async function rcUnpublishGuide(){
-  if(!confirm('Remove the Guide tab for field officers on this project?'))return;
-  try{await rcFetch(`recon_field_guide?project_id=eq.${rcQ(RC.pid)}&company_id=eq.${rcQ(rcCid())}`,{method:'DELETE'});RC.guide=null;rcRenderGuide();toast('Guide unpublished','ok');}
-  catch(e){toast('Could not unpublish: '+e.message,'err');}
+async function rcToggleGuide(){
+  if(!RC.guide)return;const nv=RC.guide.enabled===false;
+  try{await rcGuidePatch({enabled:nv});RC.guide.enabled=nv;rcRenderGuide();toast(nv?'Guide switched ON for field officers':'Guide switched OFF — hidden from field officers','ok');}
+  catch(e){toast('Not changed: '+rcMsg(e),'err');}
+}
+async function rcSaveRecent(){
+  const days=Math.min(1500,Math.max(7,parseInt(document.getElementById('rc-g-days').value,10)||180));
+  try{await rcGuidePatch({recent_days:days});RC.guide.recent_days=days;toast('Saved','ok');}catch(e){toast('Not saved: '+rcMsg(e),'err');}
+}
+async function rcMarkOfficial(){
+  if(RC.busy||!RC.runId||!RC.results.length){toast('Open a saved run first','err');return;}
+  const run=RC.runs.find(r=>r.id===RC.runId);
+  if(!confirm(`Make the run of ${new Date(run.created_at).toLocaleString()} the OFFICIAL result?\n\nIt will be locked (no more accept/reject) and field officers will see it instead of their live estimate.`))return;
+  const data=rcBuildGuide(RC.far,RC.results,{locMap:rcLocMap(),recentDays:(RC.guide&&RC.guide.recent_days)||180});
+  if(JSON.stringify(data).length>4e6){toast('Result too large to share','err');return;}
+  rcBusy(true,'Making run official…');
+  try{
+    const prev=RC.guide&&RC.guide.run_id;
+    await rcRunPatch(RC.runId,{locked:true,run_type:'final'});
+    try{
+      await rcFetch('recon_field_guide?on_conflict=project_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},
+        body:JSON.stringify({company_id:rcCid(),project_id:RC.pid,snapshot_id:RC.snap.id,run_id:RC.runId,data,published_by:rcWho(),published_at:new Date().toISOString()})});
+    }catch(e){await rcRunPatch(RC.runId,{locked:false,run_type:'interim'}).catch(()=>{});throw e;}
+    if(prev&&prev!==RC.runId){await rcRunPatch(prev,{locked:false,run_type:'interim'}).catch(()=>{});const o=RC.runs.find(r=>r.id===prev);if(o){o.locked=false;o.run_type='interim';}}
+    run.locked=true;run.run_type='final';RC.guide={...(RC.guide||{}),run_id:RC.runId,published_by:rcWho(),published_at:new Date().toISOString()};
+    rcBusy(false);rcRenderGuide();rcRenderSummary();rcRenderResults();toast('✅ Official result set — field officers now see it','ok');
+  }catch(e){rcBusy(false);toast('Not changed: '+rcMsg(e),'err');}
+}
+async function rcRemoveOfficial(){
+  if(!RC.guide||!RC.guide.run_id)return;
+  if(!confirm('Remove the official status? The run unlocks, and field officers go back to their live estimate.'))return;
+  try{
+    await rcGuidePatch({run_id:null,data:{}});await rcRunPatch(RC.guide.run_id,{locked:false,run_type:'interim'});
+    const o=RC.runs.find(r=>r.id===RC.guide.run_id);if(o){o.locked=false;o.run_type='interim';}
+    RC.guide.run_id=null;rcRenderGuide();rcRenderSummary();rcRenderResults();toast('Official status removed','ok');
+  }catch(e){toast('Not changed: '+rcMsg(e),'err');}
 }
 /* ══ END FAR RECONCILIATION MODULE ═══════════════════════════════ */
 
