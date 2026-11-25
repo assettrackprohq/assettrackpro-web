@@ -4562,12 +4562,12 @@ function rcEngine(inp){
     } else {
       const done = x.lk ? cov[x.lk]==='completed' : cov['__project__']==='completed';
       results.push({far_record_id:x.r.id, barcode:null, outcome:done?'missing':'not_yet_verified', level:null, basis:null, confidence:null,
-        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null});
+        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null, discrepancies:null});
     }
   });
   pvP.filter(x=>!x.done).sort(pvCmp).forEach(x=>results.push({far_record_id:null, barcode:x.a.barcode, outcome:'surplus', level:null, basis:null, confidence:null,
     pv_name:x.a.name||null, pv_location:x.a.location||null, pv_department:x.a.department||null,
-    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending'}));
+    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending', discrepancies:null}));
 
   const summary=rcSummarize(far,results,{locMap,prio});
   summary.skipped_far=farP.filter(x=>!x.dk).length; summary.skipped_pv=pvP.filter(x=>!x.dk).length;
@@ -4723,7 +4723,9 @@ function rcBlocked(code){
 async function rcAll(table,params){const out=[];for(let off=0;;off+=1000){const rows=await rcFetch(table+params+'&limit=1000&offset='+off);out.push(...rows);if(rows.length<1000)break;}return out;}
 async function rcInsert(table,rows,size=500,onConflict){
   for(let i=0;i<rows.length;i+=size){
-    await rcFetch(table+(onConflict?'?on_conflict='+onConflict:''),{method:'POST',headers:{'Prefer':(onConflict?'resolution=merge-duplicates,':'')+'return=minimal'},body:JSON.stringify(rows.slice(i,i+size))});
+    const part=rows.slice(i,i+size),keys=[...new Set(part.flatMap(r=>Object.keys(r)))];   // the database requires every row in one request to carry the same fields
+    const even=part.map(r=>{const o={};keys.forEach(k=>{o[k]=r[k]===undefined?null:r[k];});return o;});
+    await rcFetch(table+(onConflict?'?on_conflict='+onConflict:''),{method:'POST',headers:{'Prefer':(onConflict?'resolution=merge-duplicates,':'')+'return=minimal'},body:JSON.stringify(even)});
   }
 }
 function rcUuid(){return (crypto&&crypto.randomUUID)?crypto.randomUUID():'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,10);}
