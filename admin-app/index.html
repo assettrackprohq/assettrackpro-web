@@ -4451,10 +4451,24 @@ function rcCmpNum(a,b,dir){
 function rcCmpDate(a,b){ if(!a&&!b) return 0; if(!a) return 1; if(!b) return -1; return a<b?-1:a>b?1:0; }
 function rcCmpStr(a,b){ return String(a).localeCompare(String(b),'en',{numeric:true}); }
 
+/* A barcode identifies ONE physical asset. If the same barcode was captured more than once, only one record
+   counts (approved beats pending beats other, then the most recently updated) and the rest are reported. */
+function rcDedupePv(pv){
+  const rank=a=>a.approval_status==='approved'?0:((a.approval_status==='pending'||!a.approval_status)?1:2);
+  const key=a=>String(a.barcode).trim().toUpperCase(), best=new Map(), all=new Map();
+  pv.forEach(a=>{
+    const k=key(a); (all.get(k)||all.set(k,[]).get(k)).push(a);
+    const b=best.get(k);
+    if(!b || rank(a)<rank(b) || (rank(a)===rank(b) && String(a.updated_at||'')>String(b.updated_at||''))) best.set(k,a);
+  });
+  const dups=[...all.entries()].filter(([,l])=>l.length>1).map(([k,l])=>({barcode:best.get(k).barcode,count:l.length}))
+    .sort((x,y)=>y.count-x.count||String(x.barcode).localeCompare(String(y.barcode),'en',{numeric:true}));
+  return {pv:[...best.values()], dups};
+}
 const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
 
 function rcEngine(inp){
-  const far=inp.far||[], pv=inp.pv||[], locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
+  const far=inp.far||[], dd=rcDedupePv(inp.pv||[]), pv=dd.pv, locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
   const prio=st.nbv_priority||'high', thr=(st.fuzzy_threshold>0?st.fuzzy_threshold:85)/100;
   const junk=new Set((st.junk||[]).map(rcNorm));
   const act=k=>(st[k]==='accept'?'matched':'review');
@@ -4572,6 +4586,7 @@ function rcEngine(inp){
   const summary=rcSummarize(far,results,{locMap,prio});
   summary.skipped_far=farP.filter(x=>!x.dk).length; summary.skipped_pv=pvP.filter(x=>!x.dk).length;
   summary.far_has_location=farHasLoc; summary.name_only_used=nameOnly; summary.pv_total=pv.length;
+  summary.duplicate_barcode_count=dd.dups.length; summary.duplicate_barcodes=dd.dups.slice(0,50);
   return {results, summary};
 }
 
@@ -5003,7 +5018,7 @@ async function rcRun(){
   if(RC.busy||!RC.snap)return;
   const cid=rcCid(),pid=RC.pid;rcBusy(true,'Reading captured assets…');
   try{
-    const assets=await rcAll('assets',`?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,approval_status,custom_fields&order=id.asc`);
+    const assets=await rcAll('assets',`?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,approval_status,custom_fields,updated_at&order=id.asc`);
     const mode=RC.settings.count_mode;
     const pv=assets.filter(a=>a.barcode&&a.approval_status!=='rejected'&&(mode!=='approved_only'||a.approval_status==='approved')).map(rcPvEnrich);
     const cov={};Object.values(RC.cov).forEach(c=>cov[rcCovKey(c.location)]=c.status);
@@ -5043,7 +5058,8 @@ function rcRenderSummary(){
     ${sr('MATCHED',BS.matched,1)}${sr('PROBABLE (REVIEW)',BS.review,1)}${sr('FAR UNMATCHED',BS.unmatched,1)}${sr('SURPLUS PV',BS.surplus,0)}
     <tr><td><b>Grand total</b></td><td>${rcFmt((BS.matched&&BS.matched.count||0)+(BS.review&&BS.review.count||0)+(BS.unmatched&&BS.unmatched.count||0)+(BS.surplus&&BS.surplus.count||0))}</td><td></td><td></td><td></td></tr></table>
    <div style="font-size:11px;color:var(--text2);margin:10px 0;">Matched by level — ${lv||'—'}<br>Unique ${rcFmt(S.unique)} / group-assigned ${rcFmt(S.group_assigned)} (right on count, interchangeable on which unit) · ${rcFmt(S.pending_matched)} matched on pending captures · NBV priority: ${rcH(S.nbv_priority)}
-   ${S.skipped_far?`<br><b>${S.skipped_far}</b> FAR lines have no description (cannot match by name)`:''}${(S.unmapped_locations||[]).length?`<br>⚠ ${S.unmapped_locations.length} FAR location(s) not mapped: ${rcH(S.unmapped_locations.slice(0,8).join(', '))}`:''}</div>
+   ${S.skipped_far?`<br><b>${S.skipped_far}</b> FAR lines have no description (cannot match by name)`:''}${(S.unmapped_locations||[]).length?`<div style="margin-top:8px;padding:8px 12px;border:2px solid #b9770e;border-radius:10px;color:var(--text);"><b>⚠ ${S.unmapped_locations.length} FAR location(s) do not exist in this project:</b> ${rcH(S.unmapped_locations.slice(0,8).join(', '))}${S.unmapped_locations.length>8?'…':''}<br>Location is mandatory, so FAR lines there cannot match any capture. Add them under <b>Locations &amp; Depts</b> (so officers can capture there), or map them in step 3 if they are the same place as an existing location, then run again.</div>`:''}
+   ${(S.duplicate_barcodes||[]).length?`<div style="margin-top:8px;padding:8px 12px;border:2px solid #b9770e;border-radius:10px;color:var(--text);"><b>⚠ ${S.duplicate_barcode_count} barcode(s) were captured more than once:</b> ${rcH(S.duplicate_barcodes.slice(0,8).map(d=>d.barcode+' ×'+d.count).join(', '))}${S.duplicate_barcode_count>8?'…':''}<br>Only one record per barcode is counted (approved first, then the most recent). Check and delete the extra capture(s) in the Asset Register.</div>`:''}</div>
    ${tbl(S.by_category,'Category','(no category)')}${tbl(S.by_location,'Location','(no location)')}${tbl(S.by_department,'Department','(no department)')}
    <div style="font-size:12px;font-weight:800;margin:14px 0 6px;">Unmatched trend across runs</div>
    <table class="tbl"><tr><th>Run</th><th>By</th><th>Matched</th><th>Probable</th><th>Unmatched</th><th>NBV not seen</th><th>Resolved</th><th></th></tr>`+
