@@ -1029,6 +1029,7 @@ select.fi{appearance:none;cursor:pointer;}.fr{display:grid;grid-template-columns
         <div class="card"><div class="card-ttl">6. Run &amp; summary</div><div id="rc-run"></div></div>
         <div class="card"><div class="card-ttl">7. Field Guide <span>automatic for field officers · make a run Official</span></div><div id="rc-guide"></div></div>
         <div class="card"><div class="card-ttl">8. Results <span>side by side, FAR beside physical verification</span></div><div id="rc-res"></div></div>
+        <div class="card"><div class="card-ttl">9. Management reports <span>Excel · Word · PDF for finance and management</span></div><div id="rc-reports"></div></div>
       </div>
     </div>
 
@@ -4408,6 +4409,25 @@ function show(name){
   if(name==='import'){initImportPanel();}
 }
 
+// ── Asset inserts: never fail silently ──
+/* ── Asset inserts must never fail silently ─────────────────────────────────────
+   The REST client returns a database refusal as an ordinary value (not an exception), so the old
+   `.catch(()=>{})` never fired and a rejected asset still showed as added. A barcode clash is now
+   reported, and the asset that never reached the database is removed from the screen. */
+function atpAssetErr(e){const m=String((e&&e.message)||e||'');return /assets_company_barcode_uniq|assets_barcode/i.test(m)?'barcode already registered for this company':m;}
+function atpInsertAssetChecked(asset,quiet,onFail){
+  return sb.insert('assets',asset).then(r=>{
+    if(r&&!Array.isArray(r)&&(r.code||r.message||r.error))throw new Error(r.message||r.error||'rejected');
+    return true;
+  }).catch(e=>{
+    const i=allAssets.indexOf(asset);if(i>-1)allAssets.splice(i,1);
+    try{if(typeof renderAssets==='function')renderAssets();}catch(_){}
+    if(!quiet)toast('Not saved: '+asset.barcode+' — '+atpAssetErr(e),'err');
+    if(onFail)onFail(asset,e);
+    return false;
+  });
+}
+
 // ── FAR Reconciliation module ──
 /* ── RC ENGINE v2 (pure; no DOM, no network) ──────────────────────────
    Levels, strictest first (each works only on what is still unmatched):
@@ -4417,6 +4437,8 @@ function show(name){
      L4   fuzzy name (bigram Dice ≥ threshold)                               → review (configurable)
      L4T  token containment (e.g. "LG 55 Television" ⊂ "LG 55 Nano … Television") → review (configurable)
      L5   same product type (last word of the name) + compatible category     → review (configurable)
+   NOTES: a capture's Notes may hold the specific description (name "Laptop", Notes "Dell Latitude 5301"). L4/L4T also read
+   name + Notes (reported as L4N / L4TN), always as REVIEW-level pairings, never auto-accepted.
    LOCATION RULE: if a FAR line has a location it can only match captures in that same location (all levels above).
    Leftover located lines may then match captures in ANOTHER location (X-levels: identifier or exact name) — review only.
    Always one-to-one. Deterministic: same inputs + settings → same result.
@@ -4465,7 +4487,7 @@ function rcDedupePv(pv){
     .sort((x,y)=>y.count-x.count||String(x.barcode).localeCompare(String(y.barcode),'en',{numeric:true}));
   return {pv:[...best.values()], dups};
 }
-const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
+const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L4N':'Fuzzy name — using Notes','L4TN':'Name tokens — using Notes','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
 
 function rcEngine(inp){
   const far=inp.far||[], dd=rcDedupePv(inp.pv||[]), pv=dd.pv, locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
@@ -4474,9 +4496,10 @@ function rcEngine(inp){
   const act=k=>(st[k]==='accept'?'matched':'review');
   const locKey=raw=>{ const k=rcNorm(raw); if(!k) return ''; const m=locMap[k]; return rcNorm(m||raw); };
 
-  const farP=far.map(r=>({r, fam:rcNorm(String(r.category||'').split(/[-\/]/)[0]), head:(rcNorm(r.description).split(' ').pop()||''), lk:locKey(r.location), dk:rcNorm(r.description), tok:rcTokens(r.description),
+  const farP=far.map(r=>({r, fam:rcNorm(String(r.category||'').split(/[-\/]/)[0]), head:(rcNorm(r.description).split(' ').pop()||''), lk:locKey(r.location), dk:rcNorm(r.description), tok:rcTokens(r.description), fsort:rcTokens(r.description).slice().sort().join(' '),
     ids:{serial:rcIdNorm(r.serial,junk), chassis:rcIdNorm(r.chassis,junk), engine:rcIdNorm(r.engine,junk)}}));
   const pvP=pv.map(a=>({a, cat:rcNorm((a.category||'')+' '+(a.sub_category||'')), lk:rcNorm(a.location), dk:rcNorm(a.name), tok:rcTokens(a.name),
+    nk:rcNorm(a.notes), tokAll:rcTokens((a.name||'')+' '+(a.notes||'')), nsort:rcTokens((a.name||'')+' '+(a.notes||'')).slice().sort().join(' '),
     ids:{serial:rcIdNorm(a.serial,junk), chassis:rcIdNorm(a.chassis,junk), engine:rcIdNorm(a.engine,junk)}}));
   pvP.forEach(x=>{x.head=(x.dk.split(' ').pop()||'');});
   const farHasLoc=farP.length>0 && farP.filter(x=>x.lk).length/farP.length>=0.5;
@@ -4518,20 +4541,21 @@ function rcEngine(inp){
   };
   const scoredLevel=(level,scoreFn,outcome,scope)=>{
     if(!unF.length||!unP.length) return;
-    const df=new Map(); unP.forEach(p=>p.tok.forEach(t=>df.set(t,(df.get(t)||0)+1)));
+    const df=new Map(); unP.forEach(p=>p.tokAll.forEach(t=>df.set(t,(df.get(t)||0)+1)));
     const maxDf=Math.max(60,Math.ceil(unP.length*0.05)), idx=new Map();
-    unP.forEach(p=>p.tok.forEach(t=>{ if(df.get(t)<=maxDf) (idx.get(t)||idx.set(t,[]).get(t)).push(p); }));
+    unP.forEach(p=>p.tokAll.forEach(t=>{ if(df.get(t)<=maxDf) (idx.get(t)||idx.set(t,[]).get(t)).push(p); }));
     const pairs=[];
     unF.forEach(f=>{
       if(!inScope(f,scope)) return;
       const seen=new Set();
       f.tok.forEach(t=>(idx.get(t)||[]).forEach(p=>{
         if(seen.has(p)||!gateOK(f,p,scope)) return; seen.add(p);
-        const s=scoreFn(f,p); if(s>0) pairs.push({f,p,s});
+        const s0=scoreFn(f,p,false), s1=p.nk?scoreFn(f,p,true):0, s=Math.max(s0,s1);   // the capture's Notes may carry the specific description
+        if(s>0) pairs.push({f,p,s,vn:s1>s0});
       }));
     });
     pairs.sort((a,b)=>b.s-a.s || a.f.rank-b.f.rank || pvCmp(a.p,b.p));
-    pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,level,'unique',Math.round(c.s*100),outcome); });
+    pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,c.vn?level+'N':level,'unique',Math.round(c.s*100),outcome); });
     sweep();
   };
   const typeLevel=(outcome,scope)=>{
@@ -4544,13 +4568,16 @@ function rcEngine(inp){
     });
     sweep();
   };
-  const tokFn=(f,p)=>{
-    const A=f.tok,B=p.tok; if(Math.min(A.length,B.length)<2) return 0;
+  const tokFn=(f,p,useN)=>{
+    const A=f.tok,B=useN?p.tokAll:p.tok;
+    // Notes path: every word of the FAR description appears somewhere in the capture's name + Notes
+    if(useN&&A.length>=2){const all=new Set(B); if(A.every(t=>all.has(t))) return Math.max(A.length/B.length,0.6);}
+    if(Math.min(A.length,B.length)<2) return 0;
     const [S,L]=A.length<=B.length?[A,B]:[B,A], set=new Set(L);
     if(!S.every(t=>set.has(t))) return 0;
     const sc=S.length/L.length; return sc>=0.5?sc:0;
   };
-  const diceFn=(f,p)=>{ const s=rcDice(f.dk,p.dk); return s>=thr?s:0; };
+  const diceFn=(f,p,useN)=>{ let s=rcDice(f.dk,p.dk); if(useN&&p.nk) s=Math.max(s,rcDice(f.fsort,p.nsort),rcDice(f.dk,p.nk)); return s>=thr?s:0; };
 
   ['loc','free'].forEach(scope=>{
     if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('L2-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'matched', scope));
@@ -4571,17 +4598,17 @@ function rcEngine(inp){
     if(m){
       results.push({far_record_id:x.r.id, barcode:m.p.a.barcode, outcome:m.outcome, level:m.level, basis:m.basis, confidence:m.conf,
         pv_name:m.p.a.name||null, pv_location:m.p.a.location||null, pv_department:m.p.a.department||null,
-        pv_custodian:m.p.a.custodian||null, pv_approval:m.p.a.approval_status||'pending',
+        pv_custodian:m.p.a.custodian||null, pv_approval:m.p.a.approval_status||'pending', pv_notes:m.p.a.notes||null,
         discrepancies:(x.lk&&m.p.lk!==x.lk)?{location:{far:locMap[rcNorm(x.r.location)]||x.r.location,pv:m.p.a.location||''}}:null});
     } else {
       const done = x.lk ? cov[x.lk]==='completed' : cov['__project__']==='completed';
       results.push({far_record_id:x.r.id, barcode:null, outcome:done?'missing':'not_yet_verified', level:null, basis:null, confidence:null,
-        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null, discrepancies:null});
+        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null, pv_notes:null, discrepancies:null});
     }
   });
   pvP.filter(x=>!x.done).sort(pvCmp).forEach(x=>results.push({far_record_id:null, barcode:x.a.barcode, outcome:'surplus', level:null, basis:null, confidence:null,
     pv_name:x.a.name||null, pv_location:x.a.location||null, pv_department:x.a.department||null,
-    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending', discrepancies:null}));
+    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending', pv_notes:x.a.notes||null, discrepancies:null}));
 
   const summary=rcSummarize(far,results,{locMap,prio});
   summary.skipped_far=farP.filter(x=>!x.dk).length; summary.skipped_pv=pvP.filter(x=>!x.dk).length;
@@ -4661,6 +4688,362 @@ function rcBuildGuide(far,results,ctx){
 }
 /* ── END RC ENGINE ─────────────────────────────────────────────────── */
 
+/* ══ MANAGEMENT REPORTS — data (pure; no DOM, no network) ═══════════════════════════
+   One report pack from one saved reconciliation run:
+     1. Match rate by region and asset group  — units, cost, accumulated depreciation, NBV, in values and %
+     2. Ageing & segmentation of UNMATCHED assets — nil/nominal NBV vs residual NBV, by age band
+        → write-off candidates and "investigate first"
+     3. SURPLUS assets (found on site, not on the FAR) by site, category and class → "add to register" list
+     4. Data-quality exceptions — placeholder barcodes, missing serial numbers, duplicates
+     +  Trend across reconciliation cycles
+   Definitions used throughout:
+     MATCHED   = matched (incl. accepted other-location pairings)     PROBABLE = pairings still awaiting review
+     UNMATCHED = missing (its location is Completed) + not yet verified                                     */
+const RCR_BANDS=['Under 1 year','1 – 3 years','3 – 5 years','5 – 10 years','Over 10 years','Date not on FAR'];
+function rcrNum(v){return (v==null||v===''||isNaN(v))?0:Number(v);}
+function rcrBand(acq,asAt){
+  if(!acq) return 5;
+  const y=(Date.parse(asAt+'T00:00:00Z')-Date.parse(String(acq).slice(0,10)+'T00:00:00Z'))/(365.25*864e5);
+  if(isNaN(y)) return 5; return y<1?0:y<3?1:y<5?2:y<10?3:4;
+}
+function rcrAge(acq,asAt){
+  if(!acq) return null; const y=(Date.parse(asAt+'T00:00:00Z')-Date.parse(String(acq).slice(0,10)+'T00:00:00Z'))/(365.25*864e5);
+  return isNaN(y)?null:Math.max(0,Math.round(y*10)/10);
+}
+function rcrAcc(){return {units:0,matched:0,probable:0,unmatched:0,cost:0,costM:0,dep:0,depM:0,nbv:0,nbvM:0,nbvP:0,nbvU:0};}
+function rcrAdd(a,st,f){
+  const c=rcrNum(f.cost),d=rcrNum(f.depreciation),n=rcrNum(f.nbv);
+  a.units++; a.cost+=c; a.dep+=d; a.nbv+=n;
+  if(st==='matched'){a.matched++;a.costM+=c;a.depM+=d;a.nbvM+=n;}
+  else if(st==='probable'){a.probable++;a.nbvP+=n;}
+  else {a.unmatched++;a.nbvU+=n;}
+}
+function rcrPlaceholder(bc){
+  const s=String(bc==null?'':bc).trim();
+  if(!s) return 'blank barcode';
+  if(/\s/.test(s)) return 'contains spaces — looks like text, not a tag';
+  if(!/\d/.test(s)) return 'no digits — looks like text, not a tag';
+  if(s.length<4) return 'too short to be a tag';
+  if(/^(.)\1+$/.test(s)) return 'one repeated character';
+  if(/^(n\/?a|none|null|nil|tbc|tba|test|temp|dummy|sample|unknown|xxx+|0+|1234+|12345+)$/i.test(s)) return 'placeholder word';
+  return '';
+}
+function rcrSerialOk(v,junk){return !!rcIdNorm(v,junk);}
+
+function rcReportData(ctx){
+  const far=ctx.far||[], results=ctx.results||[], pvAssets=ctx.pvAssets||[], runs=ctx.runs||[], locMap=ctx.locMap||{};
+  const run=ctx.run||{}, nomPct=ctx.nominalPct>=0?ctx.nominalPct:1, junk=new Set((ctx.junk||['n/a','na','none','unknown','nil','null','tbc','tba','-','--']).map(rcNorm));
+  const asAt=(run.created_at?String(run.created_at):new Date().toISOString()).slice(0,10);
+  const fById=new Map(far.map(f=>[f.id,f])), rByFar=new Map();
+  results.forEach(r=>{ if(r.far_record_id) rByFar.set(r.far_record_id,r); });
+  const stOf=o=>(o==='matched'||o==='matched_discrepancy')?'matched':(o==='review'?'probable':'unmatched');
+
+  // ── prepared FAR lines
+  const L=far.map(f=>{
+    const r=rByFar.get(f.id)||{outcome:'not_yet_verified'}, st=stOf(r.outcome);
+    const loc=(f.location&&String(f.location).trim())?((locMap[rcNorm(f.location)])||String(f.location).trim()):'';
+    return {f,r,st,status:r.outcome,
+      region:(f.region&&String(f.region).trim())||loc||'(Region not on FAR)',
+      group:(f.category&&String(f.category).trim())||(f.asset_class&&String(f.asset_class).trim())||'(No category)',
+      klass:(f.asset_class&&String(f.asset_class).trim())||'(No class)', loc};
+  });
+
+  // ── 1. match rate
+  const mk=()=>({map:new Map(),tot:rcrAcc()});
+  const byRegion=mk(), byGroup=mk(), byRG=mk();
+  const put=(m,key,x)=>{const a=m.map.get(key)||m.map.set(key,rcrAcc()).get(key); rcrAdd(a,x.st,x.f); rcrAdd(m.tot,x.st,x.f);};
+  L.forEach(x=>{ put(byRegion,x.region,x); put(byGroup,x.group,x); put(byRG,x.region+' › '+x.group,x); });
+  const toRows=m=>[...m.map.entries()].map(([name,a])=>({name,...a})).sort((p,q)=>q.nbv-p.nbv||q.units-p.units||p.name.localeCompare(q.name));
+
+  // ── 2. unmatched ageing and segmentation
+  const un=L.filter(x=>x.st==='unmatched');
+  const seg=x=>{const n=x.f.nbv==null?null:Number(x.f.nbv),c=rcrNum(x.f.cost);
+    if(n!=null&&n<=0) return 'nil'; if(n!=null&&c>0&&n<=c*nomPct/100) return 'nominal'; return 'residual';};
+  const ageing=RCR_BANDS.map((band,i)=>({band,i,nil:rcrAcc(),nominal:rcrAcc(),residual:rcrAcc()}));
+  un.forEach(x=>{ const s=seg(x),a=ageing[rcrBand(x.f.acquisition_date,asAt)][s]; a.units++; a.cost+=rcrNum(x.f.cost); a.nbv+=rcrNum(x.f.nbv); });
+  const item=x=>({code:x.f.asset_code,desc:x.f.description||'',cat:x.group,loc:x.loc||x.region,acq:x.f.acquisition_date||null,age:rcrAge(x.f.acquisition_date,asAt),
+    cost:rcrNum(x.f.cost),nbv:rcrNum(x.f.nbv),status:x.status==='missing'?'Missing':'Not yet verified',seg:seg(x)});
+  const writeoff=un.filter(x=>seg(x)!=='residual').map(item)
+    .sort((a,b)=>(a.status===b.status?0:a.status==='Missing'?-1:1)||(b.age==null?-1:a.age==null?1:b.age-a.age)||b.cost-a.cost);
+  const investigate=un.filter(x=>seg(x)==='residual').map(item).sort((a,b)=>b.nbv-a.nbv||String(a.code).localeCompare(String(b.code),'en',{numeric:true}));
+  investigate.forEach((x,i)=>x.rank=i+1);
+
+  // ── 3. surplus
+  const pvBy=new Map(); pvAssets.forEach(a=>{ if(a.barcode!=null) pvBy.set(String(a.barcode).trim().toUpperCase(),a); });
+  const surplus=results.filter(r=>!r.far_record_id&&r.outcome==='surplus').map(r=>{
+    const a=pvBy.get(String(r.barcode).trim().toUpperCase())||{};
+    return {barcode:r.barcode,desc:r.pv_name||a.name||'',cat:a.category||'(No category)',klass:a.sub_category||'(No class)',site:r.pv_location||a.location||'(No location)',
+      approval:r.pv_approval||a.approval_status||'pending',serial:a.serial||'',notes:r.pv_notes||a.notes||''};
+  }).sort((a,b)=>a.site.localeCompare(b.site)||a.cat.localeCompare(b.cat)||String(a.barcode).localeCompare(String(b.barcode),'en',{numeric:true}));
+  const cnt=(rows,f)=>{const m=new Map();rows.forEach(r=>{const k=f(r);m.set(k,(m.get(k)||0)+1);});return m;};
+  const surCats=[...cnt(surplus,r=>r.cat).entries()].sort((a,b)=>b[1]-a[1]).map(e=>e[0]);
+  const topCats=surCats.slice(0,6), siteRows=[...cnt(surplus,r=>r.site).keys()].sort().map(site=>{
+    const rows=surplus.filter(r=>r.site===site),o={site,total:rows.length,other:0};
+    topCats.forEach(c=>{o['c:'+c]=rows.filter(r=>r.cat===c).length;});
+    o.other=rows.filter(r=>!topCats.includes(r.cat)).length; return o;}).sort((a,b)=>b.total-a.total||a.site.localeCompare(b.site));
+  const catClass=[...cnt(surplus,r=>r.cat+'\u0001'+r.klass).entries()].map(([k,n])=>{const [cat,klass]=k.split('\u0001');return {cat,klass,units:n};})
+    .sort((a,b)=>b.units-a.units||a.cat.localeCompare(b.cat)||a.klass.localeCompare(b.klass));
+
+  // ── 4. data-quality exceptions
+  const ex=[], push=(type,source,ref,desc,detail,loc)=>ex.push({type,source,ref:ref==null?'':String(ref),desc:desc||'',detail:detail||'',loc:loc||''});
+  const seenBc=new Set(); const allBarcodes=[...pvAssets.map(a=>a.barcode),...results.filter(r=>r.barcode).map(r=>r.barcode)];
+  allBarcodes.forEach(b=>{ if(b==null)return; const k=String(b).trim().toUpperCase(); if(seenBc.has(k))return; seenBc.add(k);
+    const why=rcrPlaceholder(b); if(why){const a=pvBy.get(k)||{};push('Placeholder barcode','Physical verification',b,a.name,why,a.location);} });
+  const expects=(items,catOf,hasSerial)=>{const g=new Map();items.forEach(i=>{const k=catOf(i),o=g.get(k)||g.set(k,{n:0,s:0}).get(k);o.n++;if(hasSerial(i))o.s++;});
+    return new Set([...g.entries()].filter(([,o])=>o.n>=3&&o.s/o.n>=0.5).map(([k])=>k));};
+  const farHas=x=>rcrSerialOk(x.f.serial,junk)||rcrSerialOk(x.f.chassis,junk)||rcrSerialOk(x.f.engine,junk);
+  const farExp=expects(L,x=>x.group,farHas);
+  L.forEach(x=>{ if(farExp.has(x.group)&&!farHas(x)) push('Missing serial number','FAR',x.f.asset_code,x.f.description,'category "'+x.group+'" normally carries a serial/chassis/engine number',x.loc||x.region); });
+  const pvHas=a=>rcrSerialOk(a.serial,junk)||rcrSerialOk(a.chassis,junk)||rcrSerialOk(a.engine,junk);
+  const pvDd=rcDedupePv(pvAssets.filter(a=>a.barcode!=null&&a.approval_status!=='rejected')), pvCat=a=>a.category||'(No category)';
+  const pvExp=expects(pvDd.pv,pvCat,pvHas);
+  pvDd.pv.forEach(a=>{ if(pvExp.has(pvCat(a))&&!pvHas(a)) push('Missing serial number','Physical verification',a.barcode,a.name,'category "'+pvCat(a)+'" normally carries a serial/chassis/engine number',a.location); });
+  const codes=new Map(); L.forEach(x=>{const c=String(x.f.asset_code||'').trim().toUpperCase(); if(!c||/^ROW-\d+$/.test(c))return;(codes.get(c)||codes.set(c,[]).get(c)).push(x);});
+  codes.forEach((l,c)=>{ if(l.length>1) push('Duplicate asset code','FAR',l[0].f.asset_code,l[0].f.description,l.length+' FAR lines share this code (rows '+l.map(x=>x.f.row_no).join(', ')+')',l[0].loc||l[0].region); });
+  L.forEach(x=>{ if(/^ROW-\d+$/i.test(String(x.f.asset_code||''))) push('Blank asset code','FAR',x.f.asset_code,x.f.description,'the client FAR has no asset code on spreadsheet row '+x.f.row_no,x.loc||x.region); });
+  const sers=new Map(); L.forEach(x=>{const k=rcIdNorm(x.f.serial,junk); if(k)(sers.get(k)||sers.set(k,[]).get(k)).push(x);});
+  sers.forEach((l,k)=>{ if(l.length>1) push('Duplicate serial number','FAR',l[0].f.serial,l[0].f.description,'serial appears on '+l.length+' FAR lines ('+l.map(x=>x.f.asset_code).join(', ')+')',l[0].loc||l[0].region); });
+  const dupBc=pvDd.dups; dupBc.forEach(d=>push('Duplicate barcode','Physical verification',d.barcode,(pvBy.get(String(d.barcode).trim().toUpperCase())||{}).name,'captured '+d.count+' times; only one record is counted',(pvBy.get(String(d.barcode).trim().toUpperCase())||{}).location));
+  const pvSers=new Map(); pvDd.pv.forEach(a=>{const k=rcIdNorm(a.serial,junk); if(k)(pvSers.get(k)||pvSers.set(k,[]).get(k)).push(a);});
+  pvSers.forEach((l,k)=>{ if(l.length>1) push('Duplicate serial number','Physical verification',l[0].serial,l[0].name,'serial appears on '+l.length+' barcodes ('+l.map(a=>a.barcode).join(', ')+')',l[0].location); });
+  const exTypes=['Placeholder barcode','Missing serial number','Duplicate asset code','Duplicate serial number','Duplicate barcode','Blank asset code'];
+  const exSummary=exTypes.map(t=>({type:t,far:ex.filter(e=>e.type===t&&e.source==='FAR').length,pv:ex.filter(e=>e.type===t&&e.source!=='FAR').length}))
+    .map(r=>({...r,total:r.far+r.pv})).filter(r=>r.total>0);
+  ex.sort((a,b)=>exTypes.indexOf(a.type)-exTypes.indexOf(b.type)||a.source.localeCompare(b.source)||String(a.ref).localeCompare(String(b.ref),'en',{numeric:true}));
+
+  // ── trend across cycles (oldest first)
+  const trend=runs.slice().sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at))).map(r=>{
+    const s=r.summary||{},bs=s.by_status||{}, g=k=>bs[k]||{count:0,nbv:0,cost:0};
+    const nbvTot=g('matched').nbv+g('review').nbv+g('unmatched').nbv;
+    return {date:String(r.created_at).slice(0,10),official:!!(r.locked&&r.run_type==='final'),units:s.far_total||0,matched:s.matched||0,probable:s.review||0,unmatched:s.not_seen||0,surplus:s.surplus||0,
+      matchPct:s.far_total?(s.matched||0)/s.far_total:null,nbvUnmatched:bs.unmatched?bs.unmatched.nbv:null,nbvPct:(bs.matched&&nbvTot)?bs.matched.nbv/nbvTot:null};});
+
+  // ── headline figures
+  const T=byRegion.tot, u=ageing.reduce((a,b)=>{['nil','nominal','residual'].forEach(k=>{a[k].units+=b[k].units;a[k].nbv+=b[k].nbv;a[k].cost+=b[k].cost;});return a;},{nil:{units:0,nbv:0,cost:0},nominal:{units:0,nbv:0,cost:0},residual:{units:0,nbv:0,cost:0}});
+  const kpis={units:T.units,matched:T.matched,probable:T.probable,unmatched:T.unmatched,unitsPct:T.units?T.matched/T.units:0,costPct:T.cost?T.costM/T.cost:0,depPct:T.dep?T.depM/T.dep:0,nbvPct:T.nbv?T.nbvM/T.nbv:0,
+    nbvTotal:T.nbv,nbvUnmatched:T.nbvU,nilNominalUnits:u.nil.units+u.nominal.units,nilNominalNbv:u.nil.nbv+u.nominal.nbv,residualUnits:u.residual.units,residualNbv:u.residual.nbv,
+    surplus:surplus.length,exceptions:ex.length,missing:L.filter(x=>x.status==='missing').length,notYetVerified:L.filter(x=>x.status==='not_yet_verified').length};
+  return {meta:{project:ctx.project||'',snapshot:ctx.snapshot||'',asAt,runDate:run.created_at||'',official:!!(run.locked&&run.run_type==='final'),nominalPct:nomPct,probable:T.probable,
+      hasRegion:far.some(f=>f.region&&String(f.region).trim()),hasLocation:far.some(f=>f.location&&String(f.location).trim()),client:ctx.client||''},
+    kpis,region:{rows:toRows(byRegion),tot:byRegion.tot},group:{rows:toRows(byGroup),tot:byGroup.tot},regionGroup:{rows:toRows(byRG),tot:byRG.tot},
+    ageing,writeoff,investigate,surplus:{list:surplus,topCats,siteRows,catClass},exceptions:{list:ex,summary:exSummary,total:ex.length},trend};
+}
+/* ══ END MANAGEMENT REPORTS (data) ═══════════════════════════════════ */
+
+/* ══ MANAGEMENT REPORTS — document model + Excel / Word / PDF renderers ═══════════════
+   One model, three renderers, so every format shows exactly the same figures.
+   Libraries are passed in (ExcelJS, docx, jsPDF) — in the browser they are loaded on first use. */
+function rcrFmt(t,v){
+  if(v==null||v==='') return '';
+  switch(t){
+    case 'int': return Number(v).toLocaleString('en-GB',{maximumFractionDigits:0});
+    case 'money': return Number(v).toLocaleString('en-GB',{maximumFractionDigits:0});
+    case 'pct': return (Math.round(Number(v)*1000)/10).toFixed(1)+'%';
+    case 'num1': return Number(v).toFixed(1);
+    case 'date': { const d=new Date(String(v).slice(0,10)+'T00:00:00Z'); return isNaN(d)?String(v):d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}); }
+    default: return String(v);
+  }
+}
+function rcrDateLong(s){const d=new Date(String(s).slice(0,10)+'T00:00:00Z');return isNaN(d)?String(s||''):d.toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'UTC'});}
+
+function rcReportModel(d,mode){
+  const brief=mode!=='full', M=d.meta, K=d.kpis, B=[], N=n=>Number(n).toLocaleString('en-GB',{maximumFractionDigits:0}), P=x=>(Math.round(x*1000)/10).toFixed(1)+'%';
+  const lim=(rows,n)=>brief&&rows.length>n?{rows:rows.slice(0,n),note:`Showing the top ${n} of ${N(rows.length)}. The full list is in the Excel report.`}:{rows,note:''};
+  B.push({k:'title',text:'FAR Reconciliation — Management Report',sub:[M.project,M.snapshot?'Client FAR: '+M.snapshot:'',(M.official?'OFFICIAL result':'Interim run')+' of '+rcrDateLong(M.runDate||M.asAt),'Ageing and values as at '+rcrDateLong(M.asAt)].filter(Boolean)});
+  B.push({k:'kpis',items:[
+    {label:'Units matched',value:P(K.unitsPct),sub:N(K.matched)+' of '+N(K.units)+' FAR lines'},
+    {label:'NBV matched',value:P(K.nbvPct),sub:'₦'+N(K.nbvTotal-K.nbvUnmatched-(d.region.tot.nbvP||0))+' of ₦'+N(K.nbvTotal)},
+    {label:'Unmatched NBV',value:'₦'+N(K.nbvUnmatched),sub:N(K.unmatched)+' unmatched assets'},
+    {label:'Nil / nominal NBV',value:N(K.nilNominalUnits)+' assets',sub:'write-off candidates · ₦'+N(K.nilNominalNbv)},
+    {label:'Residual NBV',value:'₦'+N(K.residualNbv),sub:N(K.residualUnits)+' assets to investigate'},
+    {label:'Surplus on site',value:N(K.surplus)+' assets',sub:'not on the FAR'},
+    {label:'Data exceptions',value:N(K.exceptions),sub:'barcodes, serials, duplicates'}]});
+  B.push({k:'p',bold:true,text:`${P(K.unitsPct)} of units but ${P(K.nbvPct)} of NBV is matched. ${N(K.nilNominalUnits)} of the ${N(K.unmatched)} unmatched assets carry nil or nominal NBV (₦${N(K.nilNominalNbv)}), so the investigation effort belongs on the ${N(K.residualUnits)} assets holding ₦${N(K.residualNbv)} of residual NBV.`});
+  const notes=[
+    'Matched = confirmed pairings. Probable = pairings awaiting review'+(K.probable?` (${N(K.probable)} now — they are not counted as matched, so the match rate will rise as they are accepted)`:'')+'. Unmatched = Missing (its location is Completed) plus Not yet verified.',
+    'The NBV match rate is value-weighted: it shows how much of the register\'s carrying value has been physically accounted for.',
+    `Nil / nominal NBV means NBV of nil, or no more than ${M.nominalPct}% of cost. Only assets marked Missing are ready to write off; "Not yet verified" assets still depend on the verification exercise finishing.`];
+  if(!M.hasRegion&&!M.hasLocation) notes.push('The client FAR carries neither a region nor a location, so match rates are shown for the whole register in one group.');
+  B.push({k:'notes',items:notes});
+
+  const mcols=h=>[{h,key:'name',t:'text',w:30},{h:'Units',key:'units',t:'int'},{h:'Matched',key:'matched',t:'int'},{h:'Probable',key:'probable',t:'int'},{h:'Unmatched',key:'unmatched',t:'int'},{h:'Match rate',key:'unitsPct',t:'pct',heat:1},
+    {h:'Cost (₦)',key:'cost',t:'money'},{h:'Cost matched',key:'costPct',t:'pct'},{h:'Acc. depr. (₦)',key:'dep',t:'money'},{h:'Depr. matched',key:'depPct',t:'pct'},
+    {h:'NBV (₦)',key:'nbv',t:'money'},{h:'NBV matched (₦)',key:'nbvM',t:'money'},{h:'NBV match rate',key:'nbvPct',t:'pct',heat:1},{h:'NBV unmatched (₦)',key:'nbvU',t:'money'}];
+  const rate=r=>({...r,unitsPct:r.units?r.matched/r.units:0,costPct:r.cost?r.costM/r.cost:0,depPct:r.dep?r.depM/r.dep:0,nbvPct:r.nbv?r.nbvM/r.nbv:0});
+  const mt=(sheet,title,hdr,src,limit)=>{const x=limit?lim(src.rows,limit):{rows:src.rows,note:''};
+    B.push({k:'table',sheet,title,cols:mcols(hdr),rows:x.rows.map(rate),total:rate({name:'Total',...src.tot}),note:x.note,filter:false});};
+  B.push({k:'h',level:1,text:'1. Match rate by region and asset group'});
+  B.push({k:'p',text:'Units, cost, accumulated depreciation and NBV side by side, with the share of each that has been matched.'});
+  mt('1 Match by Region','Match rate by region','Region',d.region);
+  mt('2 Match by Asset Group','Match rate by asset group','Asset group',d.group);
+  const zero=d.group.rows.filter(g=>g.units>=3&&g.matched===0&&g.probable===0);
+  if(zero.length) B.push({k:'p',text:'Observation: '+zero.map(g=>`${g.name} (${N(g.units)} assets, ₦${N(g.nbv)} NBV)`).join('; ')+' — nothing was matched. Categories like this are often non-physical (for example software or licences) and cannot be verified on site; confirm with the client before treating them as missing.'});
+  mt('3 Region x Asset Group','Match rate by region and asset group','Region › Asset group',d.regionGroup,15);
+
+  B.push({k:'h',level:1,text:'2. Unmatched assets: ageing and segmentation'});
+  B.push({k:'p',text:'Unmatched assets split into nil / nominal NBV (write-off candidates) and residual NBV (investigate), by age at the report date.'});
+  const ar=d.ageing.map(a=>{const nn={units:a.nil.units+a.nominal.units,cost:a.nil.cost+a.nominal.cost,nbv:a.nil.nbv+a.nominal.nbv};return {band:a.band,nu:nn.units,nc:nn.cost,nn:nn.nbv,ru:a.residual.units,rc:a.residual.cost,rn:a.residual.nbv,tu:nn.units+a.residual.units,tn:nn.nbv+a.residual.nbv};});
+  const aT=ar.reduce((s,r)=>{Object.keys(r).forEach(k=>{if(k!=='band')s[k]=(s[k]||0)+r[k];});return s;},{band:'Total'}), tn=aT.tn||0;
+  B.push({k:'table',sheet:'4 Unmatched Ageing',title:'Unmatched assets by age band',cols:[{h:'Age band',key:'band',t:'text',w:20},{h:'Nil/nominal: units',key:'nu',t:'int'},{h:'Nil/nominal: cost (₦)',key:'nc',t:'money'},{h:'Nil/nominal: NBV (₦)',key:'nn',t:'money'},
+    {h:'Residual: units',key:'ru',t:'int'},{h:'Residual: cost (₦)',key:'rc',t:'money'},{h:'Residual: NBV (₦)',key:'rn',t:'money'},{h:'Total units',key:'tu',t:'int'},{h:'Total NBV (₦)',key:'tn',t:'money'},{h:'Share of unmatched NBV',key:'sh',t:'pct'}],
+    rows:ar.map(r=>({...r,sh:tn?r.tn/tn:0})),total:{...aT,sh:tn?1:0},note:'',filter:false});
+  const icols=[{h:'Asset code',key:'code',t:'text',w:16},{h:'Description',key:'desc',t:'text',w:38},{h:'Category',key:'cat',t:'text',w:22},{h:'Location / region',key:'loc',t:'text',w:22},{h:'Acquired',key:'acq',t:'date'},{h:'Age (yrs)',key:'age',t:'num1'},{h:'Cost (₦)',key:'cost',t:'money'},{h:'NBV (₦)',key:'nbv',t:'money'},{h:'Status',key:'status',t:'text',w:16}];
+  let x=lim(d.writeoff,25);
+  B.push({k:'table',sheet:'5 Write-off Candidates',title:'Write-off candidates — nil or nominal NBV (Missing first, then oldest)',cols:icols,rows:x.rows,note:x.note,filter:true,empty:'No unmatched assets with nil or nominal NBV.'});
+  x=lim(d.investigate,25);
+  B.push({k:'table',sheet:'6 Investigate First',title:'Investigate first — residual NBV, highest value first',cols:[{h:'Priority',key:'rank',t:'int'},...icols],rows:x.rows,note:x.note,filter:true,empty:'No unmatched assets with residual NBV.'});
+
+  B.push({k:'h',level:1,text:'3. Surplus assets found on site but not on the FAR'});
+  B.push({k:'p',text:`${N(K.surplus)} assets were found on site with no matching FAR line. They are the candidates to add to the register, once ownership is confirmed.`});
+  const tc=d.surplus.topCats;
+  B.push({k:'table',sheet:'7 Surplus Summary',title:'Surplus assets by site and category',cols:[{h:'Site',key:'site',t:'text',w:30},...tc.map(c=>({h:c,key:'c:'+c,t:'int'})),{h:'Other categories',key:'other',t:'int'},{h:'Total',key:'total',t:'int'}],
+    rows:d.surplus.siteRows,total:(()=>{const t={site:'Total',other:0,total:0};tc.forEach(c=>t['c:'+c]=0);d.surplus.siteRows.forEach(r=>{t.total+=r.total;t.other+=r.other;tc.forEach(c=>t['c:'+c]+=r['c:'+c]);});return t;})(),note:'',filter:false,empty:'No surplus assets.'});
+  B.push({k:'table',sheet:'7 Surplus Summary',title:'Surplus assets by category and class',cols:[{h:'Category',key:'cat',t:'text',w:30},{h:'Class',key:'klass',t:'text',w:30},{h:'Units',key:'units',t:'int'}],rows:d.surplus.catClass,
+    total:{cat:'Total',klass:'',units:d.surplus.catClass.reduce((a,r)=>a+r.units,0)},note:'',filter:false,empty:'No surplus assets.'});
+  x=lim(d.surplus.list,30);
+  B.push({k:'table',sheet:'8 Add to Register',title:'Assets to add to the register',cols:[{h:'Barcode',key:'barcode',t:'text',w:18},{h:'Description',key:'desc',t:'text',w:36},{h:'Category',key:'cat',t:'text',w:22},{h:'Class',key:'klass',t:'text',w:22},{h:'Site',key:'site',t:'text',w:26},{h:'Approval',key:'approval',t:'text'},{h:'Serial',key:'serial',t:'text',w:18},{h:'Notes (what was found)',key:'notes',t:'text',w:36}],
+    rows:x.rows,note:x.note,filter:true,empty:'No surplus assets.'});
+
+  B.push({k:'h',level:1,text:'4. Data quality exceptions'});
+  B.push({k:'p',text:'Issues in the register or the captured data that weaken reliability. Fixing them improves the next reconciliation.'});
+  B.push({k:'table',sheet:'9 Data Quality',title:'Exceptions by type',cols:[{h:'Exception',key:'type',t:'text',w:30},{h:'On the FAR',key:'far',t:'int'},{h:'In physical verification',key:'pv',t:'int'},{h:'Total',key:'total',t:'int'}],
+    rows:d.exceptions.summary,total:{type:'Total',far:d.exceptions.summary.reduce((a,r)=>a+r.far,0),pv:d.exceptions.summary.reduce((a,r)=>a+r.pv,0),total:d.exceptions.total},note:'',filter:false,empty:'No data quality exceptions found.'});
+  x=lim(d.exceptions.list,40);
+  B.push({k:'table',sheet:'9 Data Quality',title:'Exceptions list',cols:[{h:'Exception',key:'type',t:'text',w:24},{h:'Source',key:'source',t:'text',w:20},{h:'Reference',key:'ref',t:'text',w:18},{h:'Description',key:'desc',t:'text',w:34},{h:'Detail',key:'detail',t:'text',w:50},{h:'Location',key:'loc',t:'text',w:24}],rows:x.rows,note:x.note,filter:true,empty:''});
+
+  B.push({k:'h',level:1,text:'5. Trend across reconciliation cycles'});
+  B.push({k:'p',text:'Shows whether the unmatched population is shrinking from one cycle to the next.'});
+  B.push({k:'table',sheet:'10 Trend',title:'Cycle comparison',cols:[{h:'Cycle date',key:'date',t:'date'},{h:'Official',key:'off',t:'text'},{h:'FAR lines',key:'units',t:'int'},{h:'Matched',key:'matched',t:'int'},{h:'Probable',key:'probable',t:'int'},{h:'Unmatched',key:'unmatched',t:'int'},{h:'Surplus',key:'surplus',t:'int'},{h:'Unit match rate',key:'matchPct',t:'pct',heat:1},{h:'NBV match rate',key:'nbvPct',t:'pct',heat:1},{h:'Unmatched NBV (₦)',key:'nbvUnmatched',t:'money'}],
+    rows:d.trend.map(t=>({...t,off:t.official?'Yes':''})),note:d.trend.length<2?'Only one cycle so far. The trend appears from the second reconciliation.':'',filter:false,empty:'No cycles yet.'});
+  return B;
+}
+
+/* ───────────────────────────── EXCEL ───────────────────────────── */
+async function rcMakeXlsx(model,ExcelJS){
+  const wb=new ExcelJS.Workbook(); wb.creator='AssetTrack Pro'; wb.created=new Date();
+  const origAdd=wb.addWorksheet.bind(wb); wb.addWorksheet=(n,o)=>{const w=origAdd(n,o);w.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9};return w;};
+  const HDR={type:'pattern',pattern:'solid',fgColor:{argb:'FF1F4E79'}}, SUB={type:'pattern',pattern:'solid',fgColor:{argb:'FFDCE6F1'}}, TOT={type:'pattern',pattern:'solid',fgColor:{argb:'FFEAF1F8'}};
+  const NF={int:'#,##0',money:'#,##0',pct:'0.0%',num1:'0.0',date:'dd mmm yyyy',text:'@'};
+  const thin={style:'thin',color:{argb:'FFBFBFBF'}}, box={top:thin,left:thin,bottom:thin,right:thin};
+  const sums=wb.addWorksheet('Summary',{views:[{showGridLines:false}]}); sums.columns=[{width:34},{width:22},{width:44}];
+  let r=1;
+  const title=model.find(b=>b.k==='title');
+  sums.getCell(r,1).value=title.text; sums.getCell(r,1).font={bold:true,size:16,color:{argb:'FF1F4E79'}}; r++;
+  title.sub.forEach(s=>{sums.getCell(r,1).value=s;sums.getCell(r,1).font={size:10,color:{argb:'FF595959'}};r++;}); r++;
+  const kp=model.find(b=>b.k==='kpis');
+  ['Key figure','Value','Detail'].forEach((h,i)=>{const c=sums.getCell(r,i+1);c.value=h;c.font={bold:true,color:{argb:'FFFFFFFF'}};c.fill=HDR;c.border=box;}); r++;
+  kp.items.forEach(it=>{[it.label,it.value,it.sub].forEach((v,i)=>{const c=sums.getCell(r,i+1);c.value=v;c.border=box;if(i===1)c.font={bold:true};if(i===1)c.alignment={horizontal:'right'};});r++;}); r++;
+  model.filter(b=>b.k==='p'&&b.bold).forEach(b=>{sums.mergeCells(r,1,r,3);const c=sums.getCell(r,1);c.value=b.text;c.font={bold:true};c.alignment={wrapText:true,vertical:'top'};sums.getRow(r).height=48;r++;}); r++;
+  sums.getCell(r,1).value='How to read this report';sums.getCell(r,1).font={bold:true};r++;
+  model.find(b=>b.k==='notes').items.forEach(t=>{sums.mergeCells(r,1,r,3);const c=sums.getCell(r,1);c.value=t;c.alignment={wrapText:true,vertical:'top'};sums.getRow(r).height=Math.max(32,Math.ceil(t.length/95)*16);r++;}); r++;
+  sums.getCell(r,1).value='Contents';sums.getCell(r,1).font={bold:true};r++;
+  [...new Set(model.filter(b=>b.k==='table').map(b=>b.sheet))].forEach(s=>{sums.getCell(r,1).value=s;r++;});
+
+  const sheets=new Map();
+  model.filter(b=>b.k==='table').forEach(t=>{ if(!sheets.has(t.sheet)){const ws=wb.addWorksheet(t.sheet.slice(0,31),{views:[{showGridLines:false}]});sheets.set(t.sheet,{ws,row:1,n:0,t});} });
+  model.filter(b=>b.k==='table').forEach(t=>{
+    const S=sheets.get(t.sheet),ws=S.ws; S.n++;
+    if(S.row===1){ws.getCell(1,1).value=t.sheet.replace(/^\d+\s/,'');ws.getCell(1,1).font={bold:true,size:14,color:{argb:'FF1F4E79'}};S.row=3;}
+    ws.getCell(S.row,1).value=t.title; ws.getCell(S.row,1).font={bold:true,size:11}; S.row++;
+    const hdrRow=S.row; t.cols.forEach((c,i)=>{const cell=ws.getCell(S.row,i+1);cell.value=c.h;cell.font={bold:true,color:{argb:'FFFFFFFF'}};cell.fill=HDR;cell.border=box;cell.alignment={horizontal:c.t==='text'?'left':'center',vertical:'middle',wrapText:true};});
+    ws.getRow(S.row).height=32; S.row++;
+    const first=S.row;
+    if(!t.rows.length&&t.empty){ws.getCell(S.row,1).value=t.empty;ws.getCell(S.row,1).font={italic:true,color:{argb:'FF595959'}};S.row++;}
+    t.rows.forEach((row,ri)=>{t.cols.forEach((c,i)=>{const cell=ws.getCell(S.row,i+1);let v=row[c.key];if(c.t==='date'&&v)v=new Date(String(v).slice(0,10)+'T00:00:00Z');
+      cell.value=(v===undefined||v===null||v==='')?null:v;cell.numFmt=NF[c.t]||'@';cell.border=box;cell.alignment={horizontal:c.t==='text'?'left':'right',vertical:'top',wrapText:c.t==='text'};});S.row++;});
+    const last=S.row-1;
+    if(t.total){t.cols.forEach((c,i)=>{const cell=ws.getCell(S.row,i+1);cell.value=t.total[c.key]===undefined?null:t.total[c.key];cell.numFmt=NF[c.t]||'@';cell.font={bold:true};cell.fill=TOT;cell.border={...box,top:{style:'medium',color:{argb:'FF1F4E79'}}};cell.alignment={horizontal:c.t==='text'?'left':'right'};});S.row++;}
+    t.cols.forEach((c,i)=>{ if(c.heat&&t.rows.length){const L=ws.getColumn(i+1).letter;ws.addConditionalFormatting({ref:`${L}${first}:${L}${last}`,rules:[{type:'colorScale',cfvo:[{type:'num',value:0},{type:'num',value:0.5},{type:'num',value:1}],color:[{argb:'FFF8696B'},{argb:'FFFFEB84'},{argb:'FF63BE7B'}]}]});} });
+    if(t.filter&&S.n===1&&t.rows.length){ws.autoFilter={from:{row:hdrRow,column:1},to:{row:last,column:t.cols.length}};ws.views=[{state:'frozen',ySplit:hdrRow,showGridLines:false}];}
+    if(t.note){ws.getCell(S.row,1).value=t.note;ws.getCell(S.row,1).font={italic:true,color:{argb:'FF595959'}};S.row++;}
+    S.row++;
+    t.cols.forEach((c,i)=>{const col=ws.getColumn(i+1);const w=c.w||(c.t==='money'?16:c.t==='date'?13:11);col.width=Math.max(col.width||0,Math.min(60,Math.max(w,Math.ceil(c.h.length*0.95))));});
+  });
+  return await wb.xlsx.writeBuffer();
+}
+
+/* ───────────────────────────── WORD ───────────────────────────── */
+async function rcMakeDocx(model,docx){
+  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,WidthType,AlignmentType,ShadingType,PageOrientation,Footer,PageNumber,BorderStyle,HeadingLevel,TableLayoutType}=docx;
+  const BLUE='1F4E79', GREY='595959', FONT='Calibri', TOTALW=15000;
+  const bd={style:BorderStyle.SINGLE,size:4,color:'BFBFBF'}, borders={top:bd,bottom:bd,left:bd,right:bd};
+  const run=(t,o={})=>new TextRun({text:String(t),font:FONT,...o});
+  const para=(t,o={},p={})=>new Paragraph({children:[run(t,o)],spacing:{after:80},...p});
+  const kids=[];
+  model.forEach(b=>{
+    if(b.k==='title'){
+      kids.push(new Paragraph({children:[run(b.text,{bold:true,size:40,color:BLUE})],spacing:{after:60}}));
+      b.sub.forEach(s=>kids.push(para(s,{size:22,color:GREY})));
+    } else if(b.k==='kpis'){
+      const cw=Math.floor(TOTALW/b.items.length);
+      kids.push(new Paragraph({text:'',spacing:{after:60}}));
+      kids.push(new Table({width:{size:TOTALW,type:WidthType.DXA},columnWidths:b.items.map(()=>cw),layout:TableLayoutType.FIXED,rows:[new TableRow({children:b.items.map(it=>new TableCell({width:{size:cw,type:WidthType.DXA},borders,shading:{type:ShadingType.CLEAR,fill:'EAF1F8',color:'auto'},margins:{top:80,bottom:80,left:100,right:100},
+        children:[new Paragraph({children:[run(it.label,{size:15,color:GREY,bold:true})]}),new Paragraph({children:[run(it.value,{size:28,bold:true,color:BLUE})]}),new Paragraph({children:[run(it.sub,{size:14,color:GREY})]})]}))})]}));
+      kids.push(new Paragraph({text:'',spacing:{after:80}}));
+    } else if(b.k==='p'){ kids.push(para(b.text,{size:b.bold?22:20,bold:!!b.bold,color:b.bold?'000000':'262626'},{spacing:{after:120}})); }
+    else if(b.k==='notes'){ kids.push(para('How to read this report',{bold:true,size:22,color:BLUE})); b.items.forEach(t=>kids.push(new Paragraph({children:[run(t,{size:18,color:'262626'})],bullet:{level:0},spacing:{after:50}}))); }
+    else if(b.k==='h'){ kids.push(new Paragraph({children:[run(b.text,{bold:true,size:30,color:BLUE})],heading:HeadingLevel.HEADING_1,spacing:{before:240,after:80},pageBreakBefore:true})); }
+    else if(b.k==='table'){
+      kids.push(para(b.title,{bold:true,size:22},{spacing:{before:160,after:60},keepNext:true}));
+      if(!b.rows.length&&b.empty){kids.push(para(b.empty,{italics:true,size:18,color:GREY}));return;}
+      const widths=b.cols.map(c=>c.w||(c.t==='money'?13:c.t==='date'?12:9)), sum=widths.reduce((a,x)=>a+x,0), cw=widths.map(w=>Math.floor(TOTALW*w/sum));
+      const fs=b.cols.length>11?14:b.cols.length>8?15:17;
+      const cell=(c,i,v,o={})=>new TableCell({width:{size:cw[i],type:WidthType.DXA},borders,margins:{top:30,bottom:30,left:60,right:60},shading:o.fill?{type:ShadingType.CLEAR,fill:o.fill,color:'auto'}:undefined,
+        children:[new Paragraph({alignment:c.t==='text'?AlignmentType.LEFT:AlignmentType.RIGHT,children:[run(v,{size:fs,bold:!!o.bold,color:o.color})]})]});
+      const rows=[new TableRow({tableHeader:true,children:b.cols.map((c,i)=>new TableCell({width:{size:cw[i],type:WidthType.DXA},borders,verticalAlign:'center',margins:{top:50,bottom:50,left:60,right:60},shading:{type:ShadingType.CLEAR,fill:BLUE,color:'auto'},
+        children:[new Paragraph({alignment:c.t==='text'?AlignmentType.LEFT:AlignmentType.CENTER,children:[run(c.h,{size:fs,bold:true,color:'FFFFFF'})]})]}))})];
+      b.rows.forEach((r,ri)=>rows.push(new TableRow({cantSplit:true,children:b.cols.map((c,i)=>cell(c,i,rcrFmt(c.t,r[c.key]),{fill:ri%2?'F5F8FB':undefined}))})));
+      if(b.total) rows.push(new TableRow({children:b.cols.map((c,i)=>cell(c,i,rcrFmt(c.t,b.total[c.key]),{bold:true,fill:'EAF1F8'}))}));
+      kids.push(new Table({width:{size:TOTALW,type:WidthType.DXA},columnWidths:cw,layout:TableLayoutType.FIXED,rows}));
+      if(b.note) kids.push(para(b.note,{italics:true,size:16,color:GREY},{spacing:{before:40,after:100}}));
+    }
+  });
+  const doc=new Document({creator:'AssetTrack Pro',title:'FAR Reconciliation — Management Report',sections:[{properties:{page:{size:{orientation:PageOrientation.LANDSCAPE},margin:{top:720,bottom:720,left:720,right:720}}},
+    footers:{default:new Footer({children:[new Paragraph({alignment:AlignmentType.CENTER,children:[run('AssetTrack Pro · FAR Reconciliation · Page ',{size:14,color:GREY}),new TextRun({children:[PageNumber.CURRENT],size:14,font:FONT,color:GREY})]})]})},children:kids}]});
+  return (typeof Blob!=='undefined'&&Packer.toBlob)?await Packer.toBlob(doc):await Packer.toBuffer(doc);
+}
+
+/* ───────────────────────────── PDF ───────────────────────────── */
+function rcrPdfText(s){return String(s==null?'':s).replace(/₦\)/g,'NGN)').replace(/₦/g,'NGN ').replace(/≤/g,'<=').replace(/[^\x20-\x7E\u00A0-\u00FF\u2013\u2014\u2018\u2019\u201C\u201D\u2022\u203A\u2026]/g,'');}
+async function rcMakePdf(model,jsPDF){
+  const doc=new jsPDF({orientation:'landscape',unit:'pt',format:'a4'}), W=doc.internal.pageSize.getWidth(), H=doc.internal.pageSize.getHeight(), ML=36, CW=W-ML*2, T=rcrPdfText;
+  const BLUE=[31,78,121], GREY=[89,89,89]; let y=44;
+  const need=n=>{if(y+n>H-40){doc.addPage();y=44;}};
+  const text=(t,size,o={})=>{doc.setFont('helvetica',o.bold?'bold':(o.italic?'italic':'normal'));doc.setFontSize(size);doc.setTextColor(...(o.color||[38,38,38]));
+    const lines=doc.splitTextToSize(T(t),CW);need(lines.length*(size+3));doc.text(lines,ML,y);y+=lines.length*(size+3)+(o.after||4);};
+  model.forEach(b=>{
+    if(b.k==='title'){text(b.text,22,{bold:true,color:BLUE,after:6});b.sub.forEach(s=>text(s,10.5,{color:GREY,after:2}));y+=6;}
+    else if(b.k==='kpis'){
+      const per=4,w=(CW-(per-1)*8)/per,h=52;
+      b.items.forEach((it,i)=>{ if(i%per===0){need(h+8);} const col=i%per,x=ML+col*(w+8);
+        doc.setFillColor(234,241,248);doc.setDrawColor(191,191,191);doc.roundedRect(x,y,w,h,3,3,'FD');
+        doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...GREY);doc.text(T(it.label).toUpperCase(),x+7,y+12);
+        doc.setFontSize(15);doc.setTextColor(...BLUE);doc.text(T(it.value),x+7,y+31);
+        doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GREY);doc.text(doc.splitTextToSize(T(it.sub),w-12)[0]||'',x+7,y+44);
+        if(col===per-1||i===b.items.length-1)y+=h+8; });
+      y+=2;}
+    else if(b.k==='p'){text(b.text,b.bold?11:9.5,{bold:!!b.bold,after:6});}
+    else if(b.k==='notes'){text('How to read this report',10.5,{bold:true,color:BLUE,after:3});b.items.forEach(t=>text('•  '+t,8.5,{after:2}));y+=4;}
+    else if(b.k==='h'){doc.addPage();y=44;text(b.text,17,{bold:true,color:BLUE,after:6});}
+    else if(b.k==='table'){
+      need(60);text(b.title,10.5,{bold:true,after:3});
+      if(!b.rows.length&&b.empty){text(b.empty,9,{italic:true,color:GREY});return;}
+      const fs=b.cols.length>11?6.4:b.cols.length>8?7:8;
+      const body=b.rows.map(r=>b.cols.map(c=>T(rcrFmt(c.t,r[c.key])))), foot=b.total?[b.cols.map(c=>T(rcrFmt(c.t,b.total[c.key])))]:undefined;
+      doc.autoTable({startY:y,head:[b.cols.map(c=>T(c.h))],body,foot,margin:{left:ML,right:ML},theme:'grid',showFoot:'lastPage',
+        styles:{fontSize:fs,cellPadding:2.2,lineColor:[191,191,191],lineWidth:0.4,overflow:'linebreak',textColor:[38,38,38]},
+        headStyles:{fillColor:BLUE,textColor:255,fontStyle:'bold',halign:'center',valign:'middle'},footStyles:{fillColor:[234,241,248],textColor:[31,78,121],fontStyle:'bold'},alternateRowStyles:{fillColor:[245,248,251]},
+        columnStyles:Object.fromEntries(b.cols.map((c,i)=>[i,{halign:c.t==='text'?'left':'right',cellWidth:'auto'}])),
+        didParseCell:d=>{ const tx=b.cols[d.column.index].t==='text'; if(d.section==='head'&&tx)d.cell.styles.halign='left'; if(d.section==='foot')d.cell.styles.halign=tx?'left':'right'; }});
+      y=doc.lastAutoTable.finalY+10; if(b.note){text(b.note,8,{italic:true,color:GREY});} y+=8;
+    }
+  });
+  const n=doc.internal.getNumberOfPages();
+  for(let i=1;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GREY);doc.text(`AssetTrack Pro · FAR Reconciliation · Page ${i} of ${n}`,W/2,H-20,{align:'center'});}
+  return doc.output('arraybuffer');
+}
+/* ══ END MANAGEMENT REPORTS (render) ═════════════════════════════════ */
+
 /* ══════════════════════════════════════════════════════════════════
    FAR RECONCILIATION MODULE — Phase 1+ (Foundation, identifier/name/type levels, review, client report)
    Self-contained. Reads `assets` (never writes). Writes only recon_* tables
@@ -4672,7 +5055,7 @@ const RC={pid:null,snap:null,far:[],farById:{},maps:{},cov:{},settings:null,runs
 const RC_DEFAULT_SETTINGS={nbv_priority:'high',count_mode:'approved_pending',junk:['n/a','na','none','unknown','nil','null','tbc','tba','-','--'],
   cross_location:'review',recent_days:180,fuzzy_threshold:85,lvl_id:true,lvl_name:true,lvl_fuzzy:true,lvl_token:true,lvl_type:true,fuzzy_action:'review',token_action:'review',type_action:'review'};
 const RC_FIELDS=[['code','Asset code *'],['code2','Alternate / old asset code'],['desc','Description / product name *'],['name2','Alternate name'],['class','Asset class'],['category','Category'],
-  ['location','Location'],['department','Department / Cost Centre'],['custodian','Custodian'],['serial','Serial / registration no'],['chassis','Chassis no'],['engine','Engine no'],
+  ['region','Region / zone / state'],['location','Location'],['department','Department / Cost Centre'],['custodian','Custodian'],['serial','Serial / registration no'],['chassis','Chassis no'],['engine','Engine no'],
   ['nbv','Net book value (NBV)'],['cost','Cost / acquisition'],['depr','Depreciation'],['acq','Acquisition date']];
 const RC_SYN={
  code:['asset code','asset no','asset number','asset id','asset tag','tag no','fa no','fa number','fixed asset no','fixed asset number','fixed asset code','fa code','asset reference','asset ref'],
@@ -4681,6 +5064,7 @@ const RC_SYN={
  name2:['name','asset name','item name','alternate name','alt description'],
  class:['class','asset class'],
  category:['category','asset category','fixed asset category','group','asset group','type','asset type'],
+ region:['region','zone','geo zone','geopolitical zone','state','district','cluster','regional office'],
  location:['location','asset location','site','branch','room','building','area','location name'],
  department:['department','dept','cost centre','cost center','division','unit','cost centre department'],
  custodian:['custodian','assigned to','employee','owner','responsible person','officer','user'],
@@ -4725,7 +5109,7 @@ function rcMsg(e){
 }
 /* Is the database at the version this screen needs? Checked before anything else. */
 async function rcSchemaCheck(){
-  const probes=[['recon_far_records','asset_code2,alt_description,asset_class,chassis,engine,depreciation'],['recon_field_far','id'],['recon_field_guide','enabled,field_lines,loc_map,recent_days']];
+  const probes=[['recon_far_records','asset_code2,alt_description,asset_class,chassis,engine,depreciation,region'],['recon_field_far','id'],['recon_results','pv_notes'],['recon_field_guide','enabled,field_lines,loc_map,recent_days']];
   for(const [t,c] of probes){ try{await rcFetch(`${t}?select=${c}&limit=1`);}catch(e){return e.message==='RECON_TABLES_MISSING'?'RECON_TABLES_MISSING':'RECON_UPGRADE_NEEDED';} }
   return 'ok';
 }
@@ -4793,7 +5177,7 @@ async function rcLoadProject(){
     else toast('Could not load: '+rcMsg(e),'err');
   }
 }
-function rcRenderAll(){rcRenderSnap();rcRenderMap();rcRenderCov();rcRenderSettings();rcRenderRunCard();rcRenderGuide();}
+function rcRenderAll(){rcRenderSnap();rcRenderMap();rcRenderCov();rcRenderSettings();rcRenderRunCard();rcRenderGuide();rcRenderReports();}
 
 /* ── 1. FAR upload, validation, snapshot ─────────────────────────── */
 function rcRenderSnap(){
@@ -4853,7 +5237,7 @@ function rcBuild(){
     if([nbv,cost,dep].some(Number.isNaN))iss.badNbv++;if(Number.isNaN(acq))iss.badDate++;
     const ok=x=>(x==null||Number.isNaN(x))?null:x;
     recs.push({row_no:rowNo,asset_code:code,asset_code2:g(row,'code2')||null,description:desc||null,alt_description:g(row,'name2')||null,asset_class:g(row,'class')||null,
-      category:g(row,'category')||null,location:loc||null,department:g(row,'department')||null,custodian:g(row,'custodian')||null,serial:serial||null,
+      category:g(row,'category')||null,region:g(row,'region')||null,location:loc||null,department:g(row,'department')||null,custodian:g(row,'custodian')||null,serial:serial||null,
       chassis:g(row,'chassis')||null,engine:g(row,'engine')||null,nbv:ok(nbv),cost:ok(cost),depreciation:ok(dep),acquisition_date:Number.isNaN(acq)?null:acq});
   });
   Object.entries(cnt).forEach(([k,n])=>{if(n>1){iss.dupCodes[k]=n;iss.dupLines+=n;}});
@@ -4979,8 +5363,8 @@ function rcRenderSettings(){
    <table class="tbl" style="max-width:760px;"><tr><th>On</th><th>Level</th><th>Criteria</th><th>When it matches</th></tr>
    <tr><td>${chk('rc-l-id',s.lvl_id)}</td><td>L2</td><td>Serial / registration, chassis or engine number equal</td><td>Auto-accept</td></tr>
    <tr><td>${chk('rc-l-name',s.lvl_name)}</td><td>L3</td><td>Same description. <b>If the FAR line has a location, the capture must be in that same location</b> (mandatory, applies to every level below too). FAR lines with no location can match a capture anywhere.</td><td>Auto-accept</td></tr>
-   <tr><td>${chk('rc-l-fuzzy',s.lvl_fuzzy)}</td><td>L4</td><td>Similar description, at least <input class="fi" id="rc-s-thr" type="number" min="60" max="99" value="${rcH(s.fuzzy_threshold)}" style="width:62px;display:inline-block;padding:4px 8px;">% alike</td><td>${act('rc-a-fuzzy',s.fuzzy_action)}</td></tr>
-   <tr><td>${chk('rc-l-token',s.lvl_token)}</td><td>L4T</td><td>One description's key words all appear in the other (e.g. "LG 55 Television" within a longer name)</td><td>${act('rc-a-token',s.token_action)}</td></tr>
+   <tr><td>${chk('rc-l-fuzzy',s.lvl_fuzzy)}</td><td>L4</td><td>Similar description (the capture's <b>Notes</b> are read too, e.g. name “Laptop”, Notes “Dell Latitude 5301”), at least <input class="fi" id="rc-s-thr" type="number" min="60" max="99" value="${rcH(s.fuzzy_threshold)}" style="width:62px;display:inline-block;padding:4px 8px;">% alike</td><td>${act('rc-a-fuzzy',s.fuzzy_action)}</td></tr>
+   <tr><td>${chk('rc-l-token',s.lvl_token)}</td><td>L4T</td><td>One description's key words all appear in the other (e.g. "LG 55 Television" within a longer name), or every word of the FAR description appears in the capture's name + Notes</td><td>${act('rc-a-token',s.token_action)}</td></tr>
    <tr><td>${chk('rc-l-type',s.lvl_type)}</td><td>L5</td><td>Same product type (last word, e.g. Television, Monitor) with compatible category</td><td>${act('rc-a-type',s.type_action)}</td></tr>
    <tr><td colspan="2" style="text-align:right;">Last</td><td>Item <b>found in a different location</b> than the FAR says, with the same serial/chassis/engine number or exact description (possible transfer)</td><td><select class="fi" id="rc-s-cross" style="width:auto;padding:5px 9px;"><option value="review" ${s.cross_location!=='off'?'selected':''}>Send to review</option><option value="off" ${s.cross_location==='off'?'selected':''}>Off — never</option></select></td></tr></table>
    <button class="btn-p act-btn" style="margin-top:12px;" onclick="rcSaveSettings()">💾 Save settings</button>`;
@@ -5018,7 +5402,7 @@ async function rcRun(){
   if(RC.busy||!RC.snap)return;
   const cid=rcCid(),pid=RC.pid;rcBusy(true,'Reading captured assets…');
   try{
-    const assets=await rcAll('assets',`?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,approval_status,custom_fields,updated_at&order=id.asc`);
+    const assets=await rcAll('assets',`?company_id=eq.${rcQ(cid)}&project_id=eq.${rcQ(pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,notes,approval_status,custom_fields,updated_at&order=id.asc`);
     const mode=RC.settings.count_mode;
     const pv=assets.filter(a=>a.barcode&&a.approval_status!=='rejected'&&(mode!=='approved_only'||a.approval_status==='approved')).map(rcPvEnrich);
     const cov={};Object.values(RC.cov).forEach(c=>cov[rcCovKey(c.location)]=c.status);
@@ -5035,10 +5419,10 @@ async function rcRun(){
     catch(e){ await rcFetch('recon_runs?id=eq.'+rcQ(runId),{method:'DELETE'}).catch(()=>{}); throw e; }
     rcBusy(false);toast(`✅ Run saved — ${out.summary.matched.toLocaleString()} matched, ${out.summary.review.toLocaleString()} to review, ${out.summary.not_seen.toLocaleString()} not seen`,'ok');
     RC.runId=runId;RC.runs=await rcFetch(`recon_runs?project_id=eq.${rcQ(pid)}&select=id,run_type,summary,created_by,created_at,snapshot_id,locked&order=created_at.desc`);
-    rcRenderSummary();rcRenderGuide();await rcLoadResults(runId);
+    rcRenderSummary();rcRenderGuide();rcRenderReports();await rcLoadResults(runId);
   }catch(e){rcBusy(false);toast('Run failed: '+rcMsg(e),'err');}
 }
-function rcSelectRun(id){RC.runId=id;RC.page=0;rcRenderSummary();rcRenderGuide();rcLoadResults(id);}
+function rcSelectRun(id){RC.runId=id;RC.page=0;rcRenderSummary();rcRenderGuide();rcRenderReports();rcLoadResults(id);}
 function rcRenderSummary(){
   const el=document.getElementById('rc-summary');if(!el)return;
   if(!RC.runs.length){el.innerHTML='<div style="font-size:12px;color:var(--text3);">No runs yet. Set the exercise status, then run.</div>';return;}
@@ -5100,7 +5484,7 @@ function rcRenderResults(){
    <tr><th>Asset code</th><th>Description</th><th>Location*</th><th>NBV</th><th>Tag no</th><th>Description</th><th>Location</th><th></th><th></th><th></th></tr>`+
    slice.map(({r,f})=>{const o=RC_OC[r.outcome]||['bu',r.outcome];
      return `<tr><td>${rcH(f&&f.asset_code)}</td><td>${rcH(f&&f.description)}</td><td>${rcH(f?rcEffLocation(f,r,lm):'')}</td><td>${f?rcFmt(f.nbv):''}</td>
-     <td>${rcH(r.barcode)}${r.pv_approval&&r.pv_approval!=='approved'&&r.barcode?' <span title="capture not yet approved" style="color:#b9770e;">●</span>':''}</td><td>${rcH(r.pv_name)}</td><td>${rcH(r.pv_location)}</td>
+     <td>${rcH(r.barcode)}${r.pv_approval&&r.pv_approval!=='approved'&&r.barcode?' <span title="capture not yet approved" style="color:#b9770e;">●</span>':''}</td><td>${rcH(r.pv_name)}${r.pv_notes?`<div style="font-size:10px;color:var(--text2);font-style:italic;">📝 ${rcH(r.pv_notes)}</div>`:''}</td><td>${rcH(r.pv_location)}</td>
      <td><span class="badge ${o[0]}">${o[1]}</span></td><td>${r.level?rcH((RC_LEVELS[r.level]||r.level)+' · '+(r.confidence!=null?Math.round(r.confidence)+'%':'')+(r.basis==='group_assigned'?' · group':''))+(r.discrepancies&&r.discrepancies.location?'<div style="color:#b9770e;font-size:10px;font-weight:800;">⚠ location differs: FAR '+rcH(r.discrepancies.location.far)+' · found in '+rcH(r.discrepancies.location.pv||'?')+'</div>':''):''}</td>
      <td>${r.outcome==='review'&&!locked?`<button class="btn-s act-btn" title="Accept pairing" onclick="rcDecide('${r.id}','accept')">✔</button> <button class="btn-s act-btn" title="Reject pairing" onclick="rcDecide('${r.id}','reject')">✖</button>`:''}</td></tr>`;}).join('')+`</table></div>
    <div style="font-size:10px;color:var(--text3);margin-top:4px;">*Location: the FAR's own where it has one; otherwise taken from the matched physical capture.</div>
@@ -5149,9 +5533,9 @@ async function rcAcceptAll(){
 function rcStamp(){const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;}
 function rcExportCSV(){
   const rows=rcFiltered(),lm=rcLocMap(),cell=v=>{if(v==null)return '';let s=String(v);if(/^[=+\-@\t\r]/.test(s)&&isNaN(Number(s)))s="'"+s;return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
-  const hdr=['FAR Asset Code','FAR Description','FAR Category','FAR Location','FAR Department','FAR Serial','FAR NBV','FAR Cost','FAR Acquisition Date','PV Tag No','PV Description','PV Location','PV Department','PV Custodian','PV Approval','Outcome','Level','Basis','Confidence'];
+  const hdr=['FAR Asset Code','FAR Description','FAR Category','FAR Location','FAR Department','FAR Serial','FAR NBV','FAR Cost','FAR Acquisition Date','PV Tag No','PV Description','PV Notes','PV Location','PV Department','PV Custodian','PV Approval','Outcome','Level','Basis','Confidence'];
   const lines=[hdr.join(',')];
-  rows.forEach(({r,f})=>lines.push([f&&f.asset_code,f&&f.description,f&&f.category,f?rcEffLocation(f,r,lm):'',f&&f.department,f&&f.serial,f&&f.nbv,f&&f.cost,f&&f.acquisition_date,r.barcode,r.pv_name,r.pv_location,r.pv_department,r.pv_custodian,r.pv_approval,(RC_OC[r.outcome]||[0,r.outcome])[1],r.level,r.basis,r.confidence].map(cell).join(',')));
+  rows.forEach(({r,f})=>lines.push([f&&f.asset_code,f&&f.description,f&&f.category,f?rcEffLocation(f,r,lm):'',f&&f.department,f&&f.serial,f&&f.nbv,f&&f.cost,f&&f.acquisition_date,r.barcode,r.pv_name,r.pv_notes,r.pv_location,r.pv_department,r.pv_custodian,r.pv_approval,(RC_OC[r.outcome]||[0,r.outcome])[1],r.level,r.basis,r.confidence].map(cell).join(',')));
   const pn=((rcProj()||{}).name||'project').replace(/[^a-z0-9]+/gi,'_');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'}));a.download=`FAR_Recon_${pn}_${rcStamp()}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
 }
@@ -5159,18 +5543,18 @@ function rcExportCSV(){
 async function rcExportXLSX(){
   if(RC.busy||!RC.runId)return;rcBusy(true,'Building Excel report…');
   try{
-    const assets=await rcAll('assets',`?company_id=eq.${rcQ(rcCid())}&project_id=eq.${rcQ(RC.pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,condition,status,approval_status,custom_fields&order=id.asc`);
+    const assets=await rcAll('assets',`?company_id=eq.${rcQ(rcCid())}&project_id=eq.${rcQ(RC.pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,condition,status,notes,approval_status,custom_fields&order=id.asc`);
     const byBc=new Map(assets.map(a=>[String(a.barcode),a])),cfLabels=[];
     const cfOf=a=>{const defs=resolveCFFor(a.project_id)||[],cf=_parseCF(a),o={};defs.forEach(d=>{const l=d.label||d.key;if(!cfLabels.includes(l))cfLabels.push(l);o[l]=cf[d.key];});return o;};
     const pvInfo=new Map();assets.forEach(a=>pvInfo.set(String(a.barcode),cfOf(a)));
     const lm=rcLocMap(),run=RC.runs.find(r=>r.id===RC.runId)||{},S=run.summary||{},BS=S.by_status||{};
     const STAT={matched:'MATCHED',review:'PROBABLE (REVIEW)',missing:'FAR UNMATCHED',not_yet_verified:'NOT YET VERIFIED',surplus:'SURPLUS PV',matched_discrepancy:'MATCHED'};
     const farH=['FAR_Class','FAR_Fixed Asset Number','FAR_Fixed Asset Number 2','FAR_Fixed Asset Category','FAR_Name','FAR_Product Name','FAR_Serial/Reg No','FAR_Engine No','FAR_Chassis No','FAR_Acquisition Date','FAR_Total Acquisition','FAR_Total Depreciation','FAR_NBV','FAR_Location (from PV where FAR has none)'];
-    const pvH=['PV_Barcode','PV_Product Name','PV_Asset Category','PV_Asset Type','PV_Location Name','PV_Department','PV_Custodian','PV_Serial/Reg Number','PV_Condition','PV_Approval Status',...cfLabels.map(l=>'PV_'+l)];
+    const pvH=['PV_Barcode','PV_Product Name','PV_Notes','PV_Asset Category','PV_Asset Type','PV_Location Name','PV_Department','PV_Custodian','PV_Serial/Reg Number','PV_Condition','PV_Approval Status',...cfLabels.map(l=>'PV_'+l)];
     const farRow=(f,r)=>f?[f.asset_class,f.asset_code,f.asset_code2,f.category,f.alt_description,f.description,f.serial,f.engine,f.chassis,f.acquisition_date,f.cost,f.depreciation,f.nbv,rcEffLocation(f,r,lm)]:farH.map(()=>'');
     const pvRow=r=>{if(!r.barcode)return pvH.map((_,i)=>(i===0&&r.far_record_id)?'NA':'');
       const a=byBc.get(String(r.barcode)),cf=pvInfo.get(String(r.barcode))||{};
-      return [r.barcode,r.pv_name,a&&a.category,a&&a.sub_category,r.pv_location,r.pv_department,r.pv_custodian,a&&a.serial,a&&a.condition,r.pv_approval,...cfLabels.map(l=>cf[l])];};
+      return [r.barcode,r.pv_name,r.pv_notes||(a&&a.notes),a&&a.category,a&&a.sub_category,r.pv_location,r.pv_department,r.pv_custodian,a&&a.serial,a&&a.condition,r.pv_approval,...cfLabels.map(l=>cf[l])];};
     const recs=RC.results.map(r=>({r,f:r.far_record_id?RC.farById[r.far_record_id]:null}));
     const farLines=recs.filter(x=>x.f).sort((a,b)=>a.f.row_no-b.f.row_no),surplus=recs.filter(x=>!x.f).sort((a,b)=>String(a.r.barcode).localeCompare(String(b.r.barcode),'en',{numeric:true}));
     const sheet=(list,withStatus)=>{const hdr=['S/No',...farH,'RECON STATUS',...pvH];const rows=[hdr];list.forEach((x,i)=>rows.push([i+1,...farRow(x.f,x.r),STAT[x.r.outcome]||x.r.outcome,...pvRow(x.r)]));return rows;};
@@ -5276,6 +5660,47 @@ async function rcRemoveOfficial(){
     const o=RC.runs.find(r=>r.id===RC.guide.run_id);if(o){o.locked=false;o.run_type='interim';}
     RC.guide.run_id=null;rcRenderGuide();rcRenderSummary();rcRenderResults();toast('Official status removed','ok');
   }catch(e){toast('Not changed: '+rcMsg(e),'err');}
+}
+/* ── 9. Management reports: Excel / Word / PDF from the selected run ───────────────── */
+const RC_LIB_URLS={
+  exceljs:['https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js','https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'],
+  docx:['https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js','https://unpkg.com/docx@8.5.0/build/index.umd.js'],
+  jspdf:['https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js','https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'],
+  autotable:['https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js','https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js']};
+function rcLoadScript(url){return new Promise((res,rej)=>{const s=document.createElement('script');s.src=url;s.onload=res;s.onerror=()=>rej(new Error('could not load '+url));document.head.appendChild(s);});}
+async function rcLoadLib(name,present){
+  if(present())return; let last=null;
+  for(const url of RC_LIB_URLS[name]){try{await rcLoadScript(url);if(present())return;}catch(e){last=e;}}
+  throw new Error('Could not load the '+name+' report library. Check your internet connection and try again.'+(last?' ('+last.message+')':''));
+}
+function rcSave(data,name,mime){const blob=(typeof Blob!=='undefined'&&data instanceof Blob)?data:new Blob([data],{type:mime});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);}
+function rcRenderReports(){
+  const el=document.getElementById('rc-reports');if(!el)return;
+  if(!RC.snap){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Commit a FAR and run a reconciliation first.</div>';return;}
+  const run=RC.runs.find(r=>r.id===RC.runId);
+  if(!run){el.innerHTML='<div style="font-size:12px;color:var(--text3);">Run a reconciliation first (step 6). A report can be produced from any saved run.</div>';return;}
+  const off=run.locked&&run.run_type==='final',S=run.summary||{};
+  el.innerHTML=`<div style="font-size:12px;color:var(--text2);margin-bottom:10px;">A finance-ready pack from the selected run (<b>${new Date(run.created_at).toLocaleString()}</b>${off?' · <b>Official</b>':' · interim'}): <b>(1)</b> match rate by region and asset group in units, cost, accumulated depreciation and NBV; <b>(2)</b> ageing of unmatched assets into nil/nominal NBV (write-off candidates) and residual NBV (investigate first); <b>(3)</b> surplus assets by site, category and class, with the list to add to the register; <b>(4)</b> data-quality exceptions; plus a <b>trend across cycles</b>. Produce it after each reconciliation or verification cycle.</div>
+   ${(!off||S.review)?`<div style="padding:8px 12px;border:2px solid #b9770e;border-radius:10px;font-size:12px;margin-bottom:10px;">${!off?'This run is <b>interim</b>. ':''}${S.review?`<b>${S.review}</b> probable pairings are still awaiting review and are not counted as matched. `:''}For the final client report, review the probable pairings and make the run <b>Official</b> (step 7).</div>`:''}
+   <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;"><div class="fg" style="margin:0;"><div class="fl">“Nominal” NBV = up to this % of cost</div><input class="fi" id="rc-rp-nom" type="number" min="0" max="50" step="0.5" value="1" style="width:130px;"></div>
+   <button class="btn-p act-btn" onclick="rcDownloadReport('xlsx')">⬇ Excel (full detail)</button><button class="btn-p act-btn" onclick="rcDownloadReport('docx')">⬇ Word (summary)</button><button class="btn-p act-btn" onclick="rcDownloadReport('pdf')">⬇ PDF (summary)</button></div>
+   <div style="font-size:11px;color:var(--text3);margin-top:8px;">Excel has every list in full (filterable). Word and PDF carry the same figures with the longest lists trimmed to the top rows.</div>`;
+}
+async function rcDownloadReport(kind){
+  if(RC.busy)return; const run=RC.runs.find(r=>r.id===RC.runId);if(!run){toast('Open a saved run first','err');return;}
+  rcBusy(true,'Building the management report…');
+  try{
+    if(!RC.results.length||RC.results[0].run_id!==RC.runId) await rcLoadResults(RC.runId);
+    const assets=await rcAll('assets',`?company_id=eq.${rcQ(rcCid())}&project_id=eq.${rcQ(RC.pid)}&select=id,project_id,barcode,name,category,sub_category,location,department,custodian,serial,notes,approval_status,custom_fields,updated_at&order=id.asc`);
+    const pvAssets=assets.map(rcPvEnrich);
+    const nom=Math.min(50,Math.max(0,parseFloat((document.getElementById('rc-rp-nom')||{}).value)));
+    const data=rcReportData({far:RC.far,results:RC.results,pvAssets,runs:RC.runs,run,locMap:rcLocMap(),project:(rcProj()||{}).name||'',snapshot:(RC.snap||{}).name||'',nominalPct:isNaN(nom)?1:nom,junk:RC.settings&&RC.settings.junk});
+    const pn=((rcProj()||{}).name||'project').replace(/[^a-z0-9]+/gi,'_'),base=`FAR_Management_Report_${pn}_${rcStamp()}`;
+    if(kind==='xlsx'){await rcLoadLib('exceljs',()=>typeof ExcelJS!=='undefined');rcSave(await rcMakeXlsx(rcReportModel(data,'full'),ExcelJS),base+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');}
+    else if(kind==='docx'){await rcLoadLib('docx',()=>typeof docx!=='undefined'&&docx.Document);rcSave(await rcMakeDocx(rcReportModel(data,'brief'),docx),base+'.docx','application/vnd.openxmlformats-officedocument.wordprocessingml.document');}
+    else {await rcLoadLib('jspdf',()=>window.jspdf&&window.jspdf.jsPDF);await rcLoadLib('autotable',()=>window.jspdf.jsPDF.API&&window.jspdf.jsPDF.API.autoTable);rcSave(await rcMakePdf(rcReportModel(data,'brief'),window.jspdf.jsPDF),base+'.pdf','application/pdf');}
+    rcBusy(false);toast('✅ Report downloaded ('+kind.toUpperCase()+')','ok');
+  }catch(e){rcBusy(false);toast('Report not built: '+rcMsg(e),'err');}
 }
 /* ══ END FAR RECONCILIATION MODULE ═══════════════════════════════ */
 
@@ -7783,7 +8208,7 @@ async function pullFromSheets(){
       } else {
         if(!checkAssetCap()) return;
         allAssets.push(asset);
-        if(CONFIGURED)sb.insert('assets',asset).catch(()=>{});
+        if(CONFIGURED)atpInsertAssetChecked(asset,true,(a,e)=>gsLog('✖ '+a.barcode+' not saved — '+atpAssetErr(e),'var(--acc3)'));
         added++;
       }
       gsSyncStatus[barcode]={status:'Pulled',ts:now};
@@ -8859,7 +9284,7 @@ function commitImport(){
     const VALID_STATUS=STATUS_OPTIONS.length?STATUS_OPTIONS:['Active','Maintenance','Disposed','Unverified'];
     const VALID_COND=CONDITION_OPTIONS.length?CONDITION_OPTIONS:['Excellent','Good','Fair','Poor'];
     if(mode==='replace') allAssets=allAssets.filter(a=>a.company_id!==activeCompanyId);
-    const promises=[];
+    const promises=[], failedRows=[];
     rows.forEach(r=>{
       const barcode=String(r[0]||'').trim();
       if(!barcode){skipped++;return;}
@@ -8884,7 +9309,7 @@ function commitImport(){
       if(dup&&mode==='replace'){Object.assign(dup,asset);if(CONFIGURED)promises.push(sb.update('assets',dup.id,asset).catch(e=>logErr&&logErr('importAsset',e.message)));}
       else{
         if(!checkAssetCap()){skipped++;return;}
-        allAssets.push(asset);if(CONFIGURED)promises.push(sb.insert('assets',asset).catch(e=>logErr&&logErr('importAsset',e.message)));
+        allAssets.push(asset);if(CONFIGURED)promises.push(atpInsertAssetChecked(asset,true,(a,e)=>failedRows.push({barcode:a.barcode,why:atpAssetErr(e)})));
       }
       added++;
     });
@@ -8892,11 +9317,12 @@ function commitImport(){
       renderAssets();
       const result=document.getElementById('imp-result');
       if(result){result.style.display='';result.innerHTML=`<div style="background:rgba(0,119,204,.1);border:2px solid var(--acc);border-radius:var(--r-sm);padding:16px;font-size:13px;color:var(--text);">
-        ✅ <strong>${added}</strong> asset${added!==1?'s':''} imported.
+        ${added-failedRows.length>0?'✅':'⚠'} <strong>${added-failedRows.length}</strong> asset${(added-failedRows.length)!==1?'s':''} imported.
+        ${failedRows.length?`<div style="margin-top:8px;color:var(--acc3);font-weight:800;">✖ ${failedRows.length} NOT imported: ${failedRows.slice(0,8).map(f=>f.barcode+' ('+f.why+')').join(', ')}${failedRows.length>8?'…':''}</div>`:''}
         ${skipped>0?`<span style="color:var(--text2);"> · ${skipped} skipped (duplicate barcodes or blank rows).</span>`:''}
         <div style="font-size:11px;color:var(--text3);margin-top:6px;">Go to <strong>Asset Register</strong> to verify. Field officers can now audit by scanning these barcodes.</div>
       </div>`;}
-      clearImport();toast(`${added} asset${added!==1?'s':''} imported ✓`,'ok');
+      clearImport();toast(failedRows.length?`${added-failedRows.length} imported, ${failedRows.length} NOT imported (see list)`:`${added} asset${added!==1?'s':''} imported ✓`,failedRows.length?'err':'ok');
     });
     return;
   }
