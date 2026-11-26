@@ -2078,6 +2078,8 @@ function onSubcat(){
      L4   fuzzy name (bigram Dice ≥ threshold)                               → review (configurable)
      L4T  token containment (e.g. "LG 55 Television" ⊂ "LG 55 Nano … Television") → review (configurable)
      L5   same product type (last word of the name) + compatible category     → review (configurable)
+   NOTES: a capture's Notes may hold the specific description (name "Laptop", Notes "Dell Latitude 5301"). L4/L4T also read
+   name + Notes (reported as L4N / L4TN), always as REVIEW-level pairings, never auto-accepted.
    LOCATION RULE: if a FAR line has a location it can only match captures in that same location (all levels above).
    Leftover located lines may then match captures in ANOTHER location (X-levels: identifier or exact name) — review only.
    Always one-to-one. Deterministic: same inputs + settings → same result.
@@ -2126,7 +2128,7 @@ function rcDedupePv(pv){
     .sort((x,y)=>y.count-x.count||String(x.barcode).localeCompare(String(y.barcode),'en',{numeric:true}));
   return {pv:[...best.values()], dups};
 }
-const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
+const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L4N':'Fuzzy name — using Notes','L4TN':'Name tokens — using Notes','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
 
 function rcEngine(inp){
   const far=inp.far||[], dd=rcDedupePv(inp.pv||[]), pv=dd.pv, locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
@@ -2135,9 +2137,10 @@ function rcEngine(inp){
   const act=k=>(st[k]==='accept'?'matched':'review');
   const locKey=raw=>{ const k=rcNorm(raw); if(!k) return ''; const m=locMap[k]; return rcNorm(m||raw); };
 
-  const farP=far.map(r=>({r, fam:rcNorm(String(r.category||'').split(/[-\/]/)[0]), head:(rcNorm(r.description).split(' ').pop()||''), lk:locKey(r.location), dk:rcNorm(r.description), tok:rcTokens(r.description),
+  const farP=far.map(r=>({r, fam:rcNorm(String(r.category||'').split(/[-\/]/)[0]), head:(rcNorm(r.description).split(' ').pop()||''), lk:locKey(r.location), dk:rcNorm(r.description), tok:rcTokens(r.description), fsort:rcTokens(r.description).slice().sort().join(' '),
     ids:{serial:rcIdNorm(r.serial,junk), chassis:rcIdNorm(r.chassis,junk), engine:rcIdNorm(r.engine,junk)}}));
   const pvP=pv.map(a=>({a, cat:rcNorm((a.category||'')+' '+(a.sub_category||'')), lk:rcNorm(a.location), dk:rcNorm(a.name), tok:rcTokens(a.name),
+    nk:rcNorm(a.notes), tokAll:rcTokens((a.name||'')+' '+(a.notes||'')), nsort:rcTokens((a.name||'')+' '+(a.notes||'')).slice().sort().join(' '),
     ids:{serial:rcIdNorm(a.serial,junk), chassis:rcIdNorm(a.chassis,junk), engine:rcIdNorm(a.engine,junk)}}));
   pvP.forEach(x=>{x.head=(x.dk.split(' ').pop()||'');});
   const farHasLoc=farP.length>0 && farP.filter(x=>x.lk).length/farP.length>=0.5;
@@ -2179,20 +2182,21 @@ function rcEngine(inp){
   };
   const scoredLevel=(level,scoreFn,outcome,scope)=>{
     if(!unF.length||!unP.length) return;
-    const df=new Map(); unP.forEach(p=>p.tok.forEach(t=>df.set(t,(df.get(t)||0)+1)));
+    const df=new Map(); unP.forEach(p=>p.tokAll.forEach(t=>df.set(t,(df.get(t)||0)+1)));
     const maxDf=Math.max(60,Math.ceil(unP.length*0.05)), idx=new Map();
-    unP.forEach(p=>p.tok.forEach(t=>{ if(df.get(t)<=maxDf) (idx.get(t)||idx.set(t,[]).get(t)).push(p); }));
+    unP.forEach(p=>p.tokAll.forEach(t=>{ if(df.get(t)<=maxDf) (idx.get(t)||idx.set(t,[]).get(t)).push(p); }));
     const pairs=[];
     unF.forEach(f=>{
       if(!inScope(f,scope)) return;
       const seen=new Set();
       f.tok.forEach(t=>(idx.get(t)||[]).forEach(p=>{
         if(seen.has(p)||!gateOK(f,p,scope)) return; seen.add(p);
-        const s=scoreFn(f,p); if(s>0) pairs.push({f,p,s});
+        const s0=scoreFn(f,p,false), s1=p.nk?scoreFn(f,p,true):0, s=Math.max(s0,s1);   // the capture's Notes may carry the specific description
+        if(s>0) pairs.push({f,p,s,vn:s1>s0});
       }));
     });
     pairs.sort((a,b)=>b.s-a.s || a.f.rank-b.f.rank || pvCmp(a.p,b.p));
-    pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,level,'unique',Math.round(c.s*100),outcome); });
+    pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,c.vn?level+'N':level,'unique',Math.round(c.s*100),outcome); });
     sweep();
   };
   const typeLevel=(outcome,scope)=>{
@@ -2205,13 +2209,16 @@ function rcEngine(inp){
     });
     sweep();
   };
-  const tokFn=(f,p)=>{
-    const A=f.tok,B=p.tok; if(Math.min(A.length,B.length)<2) return 0;
+  const tokFn=(f,p,useN)=>{
+    const A=f.tok,B=useN?p.tokAll:p.tok;
+    // Notes path: every word of the FAR description appears somewhere in the capture's name + Notes
+    if(useN&&A.length>=2){const all=new Set(B); if(A.every(t=>all.has(t))) return Math.max(A.length/B.length,0.6);}
+    if(Math.min(A.length,B.length)<2) return 0;
     const [S,L]=A.length<=B.length?[A,B]:[B,A], set=new Set(L);
     if(!S.every(t=>set.has(t))) return 0;
     const sc=S.length/L.length; return sc>=0.5?sc:0;
   };
-  const diceFn=(f,p)=>{ const s=rcDice(f.dk,p.dk); return s>=thr?s:0; };
+  const diceFn=(f,p,useN)=>{ let s=rcDice(f.dk,p.dk); if(useN&&p.nk) s=Math.max(s,rcDice(f.fsort,p.nsort),rcDice(f.dk,p.nk)); return s>=thr?s:0; };
 
   ['loc','free'].forEach(scope=>{
     if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('L2-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'matched', scope));
@@ -2232,17 +2239,17 @@ function rcEngine(inp){
     if(m){
       results.push({far_record_id:x.r.id, barcode:m.p.a.barcode, outcome:m.outcome, level:m.level, basis:m.basis, confidence:m.conf,
         pv_name:m.p.a.name||null, pv_location:m.p.a.location||null, pv_department:m.p.a.department||null,
-        pv_custodian:m.p.a.custodian||null, pv_approval:m.p.a.approval_status||'pending',
+        pv_custodian:m.p.a.custodian||null, pv_approval:m.p.a.approval_status||'pending', pv_notes:m.p.a.notes||null,
         discrepancies:(x.lk&&m.p.lk!==x.lk)?{location:{far:locMap[rcNorm(x.r.location)]||x.r.location,pv:m.p.a.location||''}}:null});
     } else {
       const done = x.lk ? cov[x.lk]==='completed' : cov['__project__']==='completed';
       results.push({far_record_id:x.r.id, barcode:null, outcome:done?'missing':'not_yet_verified', level:null, basis:null, confidence:null,
-        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null, discrepancies:null});
+        pv_name:null, pv_location:null, pv_department:null, pv_custodian:null, pv_approval:null, pv_notes:null, discrepancies:null});
     }
   });
   pvP.filter(x=>!x.done).sort(pvCmp).forEach(x=>results.push({far_record_id:null, barcode:x.a.barcode, outcome:'surplus', level:null, basis:null, confidence:null,
     pv_name:x.a.name||null, pv_location:x.a.location||null, pv_department:x.a.department||null,
-    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending', discrepancies:null}));
+    pv_custodian:x.a.custodian||null, pv_approval:x.a.approval_status||'pending', pv_notes:x.a.notes||null, discrepancies:null}));
 
   const summary=rcSummarize(far,results,{locMap,prio});
   summary.skipped_far=farP.filter(x=>!x.dk).length; summary.skipped_pv=pvP.filter(x=>!x.dk).length;
@@ -2387,7 +2394,7 @@ async function gdLoadFar(meta){
     await gdSet(key,{snapshot_id:meta.snapshot_id,rows});return rows;
   }catch(e){if(c&&c.rows)return c.rows;throw e;}
 }
-const GD_CAPCOLS='id,barcode,name,category,sub_category,location,serial,custom_fields,approval_status,updated_at';
+const GD_CAPCOLS='id,barcode,name,category,sub_category,location,serial,notes,custom_fields,approval_status,updated_at';
 async function gdLoadCaps(full){
   const key='cap:'+currentProjectId,c=await gdGet(key);
   const fresh=!c||full||(Date.now()-(c.fullAt||0)>864e5);          // full re-download daily, or on ↻
@@ -2404,7 +2411,7 @@ async function gdLoadCaps(full){
 }
 function gdCfKeys(){const o={chassis:null,engine:null};(typeof customFields!=='undefined'&&customFields||[]).forEach(d=>{const l=rcNorm(d.label||d.key);if(l.includes('chassis'))o.chassis=d.key;else if(l.includes('engine'))o.engine=d.key;});return o;}
 function gdToPv(a,ck,approval){const cf=_parseCF(a);return {id:a.id||('q'+a.barcode),barcode:String(a.barcode),name:a.name,category:a.category,sub_category:a.sub_category,location:a.location,
-  serial:a.serial,chassis:ck.chassis?cf[ck.chassis]:null,engine:ck.engine?cf[ck.engine]:null,approval_status:approval||a.approval_status||'pending'};}
+  serial:a.serial,notes:a.notes,chassis:ck.chassis?cf[ck.chassis]:null,engine:ck.engine?cf[ck.engine]:null,approval_status:approval||a.approval_status||'pending'};}
 async function gdEstimate(meta,full){
   const far=await gdLoadFar(meta),caps=await gdLoadCaps(full),ck=gdCfKeys(),pv=[];
   Object.values(caps.map).forEach(a=>{if(!a.barcode||a.approval_status==='rejected')return;pv.push({...gdToPv(a,ck),updated_at:a.updated_at});});
@@ -2476,6 +2483,17 @@ function renderGuide(keepFocus){
   if(keepFocus){const q=document.getElementById('gd-q');if(q){q.focus();const n=q.value.length;try{q.setSelectionRange(n,n);}catch(e){}}}
 }
 /* ══ END PROJECT GUIDE ═════════════════════════════════════════════ */
+
+/* ── Barcode uniqueness: the database allows ONE asset per barcode per company ──
+   A clash with a DIFFERENT asset is never "synced": the officer is told plainly that nothing was saved.
+   (The same asset id arriving twice is a harmless retry and stays treated as already uploaded.) */
+function faIsBarcodeConflict(msg){return /assets_company_barcode_uniq|assets_barcode/i.test(String(msg||''));}
+function faIsIdConflict(msg){return /assets_pkey/i.test(String(msg||''));}
+function faConflictFor(id){try{return getPendingQueue().find(q=>q.id===id&&q.sync_conflict)||null;}catch(e){return null;}}
+async function faExistingOwner(barcode){
+  try{const r=await sb.query('assets',`?barcode=eq.${encodeURIComponent(barcode)}&select=name,location&limit=1`);return Array.isArray(r)&&r[0]||null;}catch(e){return null;}
+}
+function faConflictText(barcode,o){return `Barcode ${barcode} is already registered`+(o?` (${o.name||'asset'}${o.location?' @ '+o.location:''})`:'')+'. This item was NOT saved.';}
 
 function go(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -3016,7 +3034,7 @@ async function syncPendingAssets(){
   const syncBtn=document.getElementById('sync-btn');
   if(syncBtn){syncBtn.disabled=true;syncBtn.textContent='Syncing…';}
 
-  let synced=0, failed=0;
+  let synced=0, failed=0, conflicts=0;
   const remaining=[];
 
   // GPS columns — stripped as fallback if Supabase schema hasn't been migrated yet
@@ -3027,10 +3045,9 @@ async function syncPendingAssets(){
       showSaving('Syncing '+synced+'/'+q.length+'…');
       let res = await sb.insert('assets', asset).catch(async e=>{
         const msg = e.message||'';
-        // Already exists in DB (duplicate barcode) — treat as synced, remove from queue
-        if(msg.includes('duplicate key')||msg.includes('unique constraint')||msg.includes('assets_barcode')){
-          return {_already_exists:true};
-        }
+        // A DIFFERENT asset owns this barcode: a real conflict, never "synced". The same asset id again: already uploaded.
+        if(faIsBarcodeConflict(msg)){ return {_barcode_conflict:true}; }
+        if(faIsIdConflict(msg)){ return {_already_exists:true}; }
         // Schema cache error — retry without GPS fields
         if(msg.includes('schema cache')||msg.includes('column')||msg.includes('capture')){
           const GPS_COLS=['capture_lat','capture_lng','capture_location'];
@@ -3039,6 +3056,13 @@ async function syncPendingAssets(){
         }
         throw e;
       });
+      if(res&&res._barcode_conflict){
+        const owner=await faExistingOwner(asset.barcode);
+        failed++;conflicts++;
+        remaining.push({...asset,sync_conflict:true,sync_conflict_msg:faConflictText(asset.barcode,owner)});   // kept, flagged, shown in Spool
+        logFieldErr('syncPending','Barcode already registered: '+asset.barcode,'conflict');
+        continue;
+      }
       if(res&&res._already_exists){
         // Asset already in DB — just clear from queue and mark history as synced
         synced++;
@@ -3067,7 +3091,8 @@ async function syncPendingAssets(){
   updateSyncBadge();
   checkAndShowCapBanner();
   if(synced>0) toast(synced+' asset'+(synced>1?'s':'')+' synced to cloud ✓','ok');
-  if(failed>0) toast(failed+' failed — tap ⚠ for details','err');
+  if(conflicts>0) toast('⛔ '+conflicts+' capture'+(conflicts>1?'s':'')+' NOT saved: barcode already registered. Open Spool to change the barcode or delete it.','err');
+  if(failed-conflicts>0) toast((failed-conflicts)+' failed — tap ⚠ for details','err');
 }
 
 function markHistoryCloud(assetId){
@@ -3294,12 +3319,17 @@ async function saveAsset(){
       }
     }catch(e){
       const msg=e.message||'';
-      if(msg.includes('duplicate key')||msg.includes('unique constraint')||msg.includes('assets_barcode')){
-        // Barcode already in DB — do NOT call finishSave (would double-record in history/spool)
-        // This happens when an offline-saved asset was already synced in a previous session
-        // but stayed in the pending queue. Mark history as synced and clear the queue.
+      if(faIsBarcodeConflict(msg)){
+        // A DIFFERENT asset already owns this barcode. Nothing was saved — never pretend it synced.
+        hideSaving();
+        btn.disabled=false;
+        const owner=await faExistingOwner(asset.barcode);
+        toast('⛔ '+faConflictText(asset.barcode,owner),'err');
+      } else if(faIsIdConflict(msg)){
+        // Same asset id again: an offline-saved asset was already synced in a previous session but stayed
+        // in the pending queue. Mark history as synced and clear that queue entry (matched by id, not barcode).
         markHistoryCloud(asset.id);
-        const q=getPendingQueue().filter(a=>a.barcode!==asset.barcode);
+        const q=getPendingQueue().filter(a=>a.id!==asset.id);
         localStorage.setItem('atp_sync_queue',JSON.stringify(q));
         hideSaving();
         btn.disabled=false;
@@ -3727,9 +3757,10 @@ function renderSpool(){
     const delBtn=canDelete
       ?'<button onclick="spoolDeleteAsset(\''+a.id+'\')" style="background:rgba(255,72,88,.1);color:var(--acc3);border:1px solid rgba(255,72,88,.2);border-radius:7px;padding:4px 9px;font-size:9px;cursor:pointer;font-family:Arial,Helvetica,sans-serif;margin-left:4px;">Delete</button>'
       :'';
+    const cf=faConflictFor(a.id);
     const synced=a._synced
       ?'<span style="font-size:9px;color:var(--acc);margin-left:6px;">☁ Synced</span>'
-      :'<span style="font-size:9px;color:var(--text3);margin-left:6px;">⏳ Pending sync</span>';
+      :(cf?'<span style="font-size:9px;color:var(--acc3);margin-left:6px;font-weight:800;">⛔ Barcode already registered — edit the barcode or delete</span>':'<span style="font-size:9px;color:var(--text3);margin-left:6px;">⏳ Pending sync</span>');
     // QR only makes sense once the asset actually exists in the cloud
     // DB — the audit link resolves against the live `assets` table.
     const qrBtn=a._synced
@@ -3863,7 +3894,7 @@ async function spoolSaveEditedAsset(){
     try{
       let q=JSON.parse(localStorage.getItem('atp_sync_queue')||'[]');
       const qi=q.findIndex(x=>x.id===id);
-      if(qi>-1){ Object.assign(q[qi],patch); localStorage.setItem('atp_sync_queue',JSON.stringify(q)); }
+      if(qi>-1){ Object.assign(q[qi],patch); delete q[qi].sync_conflict; delete q[qi].sync_conflict_msg; localStorage.setItem('atp_sync_queue',JSON.stringify(q)); }
     }catch(e){}
   }
 
