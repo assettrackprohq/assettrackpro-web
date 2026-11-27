@@ -4440,7 +4440,8 @@ function atpInsertAssetChecked(asset,quiet,onFail){
    NOTES: a capture's Notes may hold the specific description (name "Laptop", Notes "Dell Latitude 5301"). L4/L4T also read
    name + Notes (reported as L4N / L4TN), always as REVIEW-level pairings, never auto-accepted.
    LOCATION RULE: if a FAR line has a location it can only match captures in that same location (all levels above).
-   Leftover located lines may then match captures in ANOTHER location (X-levels: identifier or exact name) — review only.
+   Leftover located lines then match captures in ANOTHER location, working down EVERY criterion (identifier, exact name,
+   similar name, key words incl. Notes, product type) until nothing more can be paired (X-levels) — review only, location difference recorded.
    Always one-to-one. Deterministic: same inputs + settings → same result.
    Location rule: when the FAR carries no location, a matched/probable FAR line is
    taken to be at the location of the physical capture it matched.            */
@@ -4487,7 +4488,7 @@ function rcDedupePv(pv){
     .sort((x,y)=>y.count-x.count||String(x.barcode).localeCompare(String(y.barcode),'en',{numeric:true}));
   return {pv:[...best.values()], dups};
 }
-const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L4N':'Fuzzy name — using Notes','L4TN':'Name tokens — using Notes','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name'};
+const RC_LEVELS={'L2-serial':'Serial / reg no','L2-chassis':'Chassis no','L2-engine':'Engine no','L3':'Name + location','L3N':'Name (exact)','L4':'Fuzzy name','L4T':'Name tokens','L4N':'Fuzzy name — using Notes','L4TN':'Name tokens — using Notes','L5':'Type (same product type)','X-serial':'Other location · serial','X-chassis':'Other location · chassis','X-engine':'Other location · engine','X-name':'Other location · name','X-L4':'Other location · similar name','X-L4N':'Other location · similar name (Notes)','X-L4T':'Other location · name tokens','X-L4TN':'Other location · name tokens (Notes)','X-L5':'Other location · same type'};
 
 function rcEngine(inp){
   const far=inp.far||[], dd=rcDedupePv(inp.pv||[]), pv=dd.pv, locMap=inp.locMap||{}, cov=inp.coverage||{}, st=inp.settings||{};
@@ -4525,7 +4526,7 @@ function rcEngine(inp){
   //   scope 'free'  = FAR lines without a location, PV anywhere
   //   scope 'cross' = leftover located FAR lines vs PV in ANOTHER location → review only, flagged
   const inScope=(f,scope)=>scope==='free'?!f.lk:!!f.lk;
-  const gateOK=(f,p,scope)=>scope==='loc'?(p.lk===f.lk):true;
+  const gateOK=(f,p,scope)=>scope==='loc'?(p.lk===f.lk):(scope==='cross'?!!p.lk:true);   // cross: a capture with a blank location still never matches a located line
   const kPre=(x,scope)=>scope==='loc'?x.lk+'##':'';
   const exactLevel=(level,keyF,keyP,outcome,scope)=>{
     const fg=new Map(), pg=new Map();
@@ -4558,13 +4559,13 @@ function rcEngine(inp){
     pairs.forEach(c=>{ if(c.f.done||c.p.done) return; take(c.f,c.p,c.vn?level+'N':level,'unique',Math.round(c.s*100),outcome); });
     sweep();
   };
-  const typeLevel=(outcome,scope)=>{
+  const typeLevel=(outcome,scope,label)=>{
     const pg=new Map(); unP.slice().sort(pvCmp).forEach(p=>{ if(p.head.length>2) (pg.get(p.head)||pg.set(p.head,[]).get(p.head)).push(p); });
     unF.slice().sort(farCmp).forEach(f=>{
       if(!inScope(f,scope)||f.head.length<=2) return;
       const g=pg.get(f.head); if(!g) return;
       const p=g.find(p=>!p.done && gateOK(f,p,scope) && (!f.fam || p.cat.includes(f.fam)));
-      if(p) take(f,p,'L5','unique',60,outcome);
+      if(p) take(f,p,label||'L5','unique',60,outcome);
     });
     sweep();
   };
@@ -4589,6 +4590,11 @@ function rcEngine(inp){
   if(st.cross_location!=='off'){        // found in a different location than the FAR says → always human-reviewed
     if(st.lvl_id!==false) ['serial','chassis','engine'].forEach(kind=>exactLevel('X-'+kind, x=>x.ids[kind], x=>x.ids[kind], 'review', 'cross'));
     if(st.lvl_name!==false) exactLevel('X-name', x=>x.dk, x=>x.dk, 'review', 'cross');
+    // …and keep going with every remaining criterion, so nothing that CAN be paired is left unmatched.
+    // All of these are review-level pairings and carry the location difference for the reviewer.
+    if(st.lvl_fuzzy!==false) scoredLevel('X-L4', diceFn, 'review', 'cross');
+    if(st.lvl_token!==false) scoredLevel('X-L4T', tokFn, 'review', 'cross');
+    if(st.lvl_type!==false) typeLevel('review', 'cross', 'X-L5');
   }
 
   const byFar=new Map(M.map(m=>[m.f.r.id,m]));
@@ -4647,6 +4653,7 @@ function rcSummarize(far,results,ctx){
     const g=(oc==='missing'||oc==='not_yet_verified')?'unmatched':oc, b=S.by_status[g]||(S.by_status[g]=z());
     b.count++; b.cost+=num(f.cost); b.dep+=num(f.depreciation); b.nbv+=num(f.nbv);
     if(oc==='missing') S.nbv_missing+=num(f.nbv); if(oc==='not_yet_verified') S.nbv_not_yet_verified+=num(f.nbv);
+    if(r.discrepancies&&r.discrepancies.location&&(oc==='matched'||oc==='review')) S.location_differs=(S.location_differs||0)+1;
     if(oc==='matched'||oc==='review'){
       S.by_level[r.level]=(S.by_level[r.level]||0)+1;
       if(oc==='matched'){ if(r.basis==='unique')S.unique++; else S.group_assigned++; if(r.pv_approval!=='approved')S.pending_matched++; }
@@ -5366,7 +5373,7 @@ function rcRenderSettings(){
    <tr><td>${chk('rc-l-fuzzy',s.lvl_fuzzy)}</td><td>L4</td><td>Similar description (the capture's <b>Notes</b> are read too, e.g. name “Laptop”, Notes “Dell Latitude 5301”), at least <input class="fi" id="rc-s-thr" type="number" min="60" max="99" value="${rcH(s.fuzzy_threshold)}" style="width:62px;display:inline-block;padding:4px 8px;">% alike</td><td>${act('rc-a-fuzzy',s.fuzzy_action)}</td></tr>
    <tr><td>${chk('rc-l-token',s.lvl_token)}</td><td>L4T</td><td>One description's key words all appear in the other (e.g. "LG 55 Television" within a longer name), or every word of the FAR description appears in the capture's name + Notes</td><td>${act('rc-a-token',s.token_action)}</td></tr>
    <tr><td>${chk('rc-l-type',s.lvl_type)}</td><td>L5</td><td>Same product type (last word, e.g. Television, Monitor) with compatible category</td><td>${act('rc-a-type',s.type_action)}</td></tr>
-   <tr><td colspan="2" style="text-align:right;">Last</td><td>Item <b>found in a different location</b> than the FAR says, with the same serial/chassis/engine number or exact description (possible transfer)</td><td><select class="fi" id="rc-s-cross" style="width:auto;padding:5px 9px;"><option value="review" ${s.cross_location!=='off'?'selected':''}>Send to review</option><option value="off" ${s.cross_location==='off'?'selected':''}>Off — never</option></select></td></tr></table>
+   <tr><td colspan="2" style="text-align:right;">Last</td><td>Anything still unmatched is tried <b>across locations</b>, working through every criterion above (identifier, exact name, similar name, key words incl. Notes, product type) until nothing more can be paired. Covers FAR locations that do not match the project, and possible transfers.</td><td><select class="fi" id="rc-s-cross" style="width:auto;padding:5px 9px;"><option value="review" ${s.cross_location!=='off'?'selected':''}>Send to review</option><option value="off" ${s.cross_location==='off'?'selected':''}>Off — never</option></select></td></tr></table>
    <button class="btn-p act-btn" style="margin-top:12px;" onclick="rcSaveSettings()">💾 Save settings</button>`;
 }
 function rcReadSettings(){
@@ -5408,7 +5415,7 @@ async function rcRun(){
     const cov={};Object.values(RC.cov).forEach(c=>cov[rcCovKey(c.location)]=c.status);
     const locMap=rcLocMap();
     const unm=rcFarLocGroups().filter(g=>!locMap[g.k]&&!assets.some(a=>rcNorm(a.location)===g.k));
-    if(unm.length&&!confirm(`${unm.length} FAR location(s) are not mapped to any project location (e.g. ${Object.keys(unm[0].labels)[0]}). Because location is mandatory, FAR lines in them cannot match any capture. Run anyway?`)){rcBusy(false);return;}
+    if(unm.length&&!confirm(`${unm.length} FAR location(s) are not mapped to any project location (e.g. ${Object.keys(unm[0].labels)[0]}). Location is checked first, so lines in them can only be paired afterwards as “found in a different location” — always for you to review, never automatically. Run anyway?`)){rcBusy(false);return;}
     rcBusy(true,'Reconciling…');
     const out=rcEngine({far:RC.far,pv,locMap,coverage:cov,settings:RC.settings});
     out.summary.pv_excluded_rejected=assets.filter(a=>a.approval_status==='rejected').length;
@@ -5441,8 +5448,8 @@ function rcRenderSummary(){
    <table class="tbl" style="max-width:640px;"><tr><th>Status</th><th>Count</th><th>Acquisition cost</th><th>Depreciation</th><th>NBV</th></tr>
     ${sr('MATCHED',BS.matched,1)}${sr('PROBABLE (REVIEW)',BS.review,1)}${sr('FAR UNMATCHED',BS.unmatched,1)}${sr('SURPLUS PV',BS.surplus,0)}
     <tr><td><b>Grand total</b></td><td>${rcFmt((BS.matched&&BS.matched.count||0)+(BS.review&&BS.review.count||0)+(BS.unmatched&&BS.unmatched.count||0)+(BS.surplus&&BS.surplus.count||0))}</td><td></td><td></td><td></td></tr></table>
-   <div style="font-size:11px;color:var(--text2);margin:10px 0;">Matched by level — ${lv||'—'}<br>Unique ${rcFmt(S.unique)} / group-assigned ${rcFmt(S.group_assigned)} (right on count, interchangeable on which unit) · ${rcFmt(S.pending_matched)} matched on pending captures · NBV priority: ${rcH(S.nbv_priority)}
-   ${S.skipped_far?`<br><b>${S.skipped_far}</b> FAR lines have no description (cannot match by name)`:''}${(S.unmapped_locations||[]).length?`<div style="margin-top:8px;padding:8px 12px;border:2px solid #b9770e;border-radius:10px;color:var(--text);"><b>⚠ ${S.unmapped_locations.length} FAR location(s) do not exist in this project:</b> ${rcH(S.unmapped_locations.slice(0,8).join(', '))}${S.unmapped_locations.length>8?'…':''}<br>Location is mandatory, so FAR lines there cannot match any capture. Add them under <b>Locations &amp; Depts</b> (so officers can capture there), or map them in step 3 if they are the same place as an existing location, then run again.</div>`:''}
+   <div style="font-size:11px;color:var(--text2);margin:10px 0;">${S.location_differs?`<b>${rcFmt(S.location_differs)}</b> pairing${S.location_differs>1?'s':''} sit in a different location than the FAR says (marked “location differs”).<br>`:''}Matched by level — ${lv||'—'}<br>Unique ${rcFmt(S.unique)} / group-assigned ${rcFmt(S.group_assigned)} (right on count, interchangeable on which unit) · ${rcFmt(S.pending_matched)} matched on pending captures · NBV priority: ${rcH(S.nbv_priority)}
+   ${S.skipped_far?`<br><b>${S.skipped_far}</b> FAR lines have no description (cannot match by name)`:''}${(S.unmapped_locations||[]).length?`<div style="margin-top:8px;padding:8px 12px;border:2px solid #b9770e;border-radius:10px;color:var(--text);"><b>⚠ ${S.unmapped_locations.length} FAR location(s) do not exist in this project:</b> ${rcH(S.unmapped_locations.slice(0,8).join(', '))}${S.unmapped_locations.length>8?'…':''}<br>Location is checked first, so FAR lines there can only be paired as “found in a different location” (for review, never automatic). Add them under <b>Locations &amp; Depts</b> (so officers can capture there), or map them in step 3 if they are the same place as an existing location, then run again.</div>`:''}
    ${(S.duplicate_barcodes||[]).length?`<div style="margin-top:8px;padding:8px 12px;border:2px solid #b9770e;border-radius:10px;color:var(--text);"><b>⚠ ${S.duplicate_barcode_count} barcode(s) were captured more than once:</b> ${rcH(S.duplicate_barcodes.slice(0,8).map(d=>d.barcode+' ×'+d.count).join(', '))}${S.duplicate_barcode_count>8?'…':''}<br>Only one record per barcode is counted (approved first, then the most recent). Check and delete the extra capture(s) in the Asset Register.</div>`:''}</div>
    ${tbl(S.by_category,'Category','(no category)')}${tbl(S.by_location,'Location','(no location)')}${tbl(S.by_department,'Department','(no department)')}
    <div style="font-size:12px;font-weight:800;margin:14px 0 6px;">Unmatched trend across runs</div>
